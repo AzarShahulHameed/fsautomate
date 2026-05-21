@@ -36,17 +36,29 @@ app.use(helmet({
 }));
 
 // ─── CORS ──────────────────────────────────────────────────────────────────
-const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173').split(',');
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : []),
+];
 app.use(cors({
-  origin: [
-    'http://localhost:5173',
-    process.env.FRONTEND_URL,
-    /\.vercel\.app$/,  // allows any vercel preview URL
-  ],
+  origin: (origin, cb) => {
+    // Allow requests with no origin (mobile, Postman, server-to-server)
+    if (!origin) return cb(null, true);
+    // Allow any vercel.app subdomain
+    if (origin.endsWith('.vercel.app')) return cb(null, true);
+    // Allow any onrender.com subdomain
+    if (origin.endsWith('.onrender.com')) return cb(null, true);
+    // Allow explicit list
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error('Not allowed by CORS: ' + origin));
+  },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Firm-ID'],
 }));
+// Handle preflight for all routes
+app.options('*', cors());
 
 // ─── Body parsing ──────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
