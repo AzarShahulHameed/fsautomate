@@ -12,7 +12,7 @@ const api = axios.create({
 // Attach stored JWT token on every request
 api.interceptors.request.use((config) => {
   try {
-    const raw = sessionStorage.getItem('finstatement-auth');
+    const raw = localStorage.getItem('finstatement-auth');
     if (raw) {
       const { state } = JSON.parse(raw);
       if (state?.token) {
@@ -28,7 +28,7 @@ api.interceptors.response.use(
   (res) => res.data,  // Unwrap .data so callers get objects directly
   (err) => {
     if (err.response?.status === 401) {
-      sessionStorage.removeItem('finstatement-auth');
+      localStorage.removeItem('finstatement-auth');
       window.location.href = '/login';
     }
     return Promise.reject(err?.response?.data || err);
@@ -113,7 +113,7 @@ const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 
 function authHeader() {
   try {
-    const raw = sessionStorage.getItem('finstatement-auth');
+    const raw = localStorage.getItem('finstatement-auth');
     if (raw) {
       const { state } = JSON.parse(raw);
       if (state?.token) return { Authorization: `Bearer ${state.token}` };
