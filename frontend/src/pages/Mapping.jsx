@@ -209,13 +209,7 @@ export default function Mapping() {
   });
 
   const allSubGroups = Object.values(subGroupTotals);
-
-  // Combine master grouping names + any custom FS heads already used in this engagement
-  const masterGroupNames = master.map(m => m.groupName);
-  const savedGroupNames  = Object.values(mappings)
-    .filter(m => m.groupName)
-    .map(m => m.groupName);
-  const uniqueGroups = [...new Set([...masterGroupNames, ...savedGroupNames])].sort();
+  const uniqueGroups = [...new Set(master.map(m => m.groupName))].sort();
 
   const filtered = allSubGroups.filter(sg => {
     const isMapped = !!mappings[sg.subGrouping]?.groupName;

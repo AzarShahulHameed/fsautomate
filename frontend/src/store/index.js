@@ -75,7 +75,7 @@ export const useStore = create(
     }),
     {
       name: 'finstatement-auth',
-      storage: createJSONStorage(() => localStorage),
+      storage: createJSONStorage(() => sessionStorage),
       partialize: (s) => ({
         token: s.token, user: s.user, firm: s.firm,
         currentClient: s.currentClient, currentEngagement: s.currentEngagement,

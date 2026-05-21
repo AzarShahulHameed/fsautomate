@@ -53,134 +53,33 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol }) {
   const cfg    = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
   const D      = divisor;
   const isIFRS = method === 'IFRS' || method === 'IFRS_SME';
-  const isIndAS = method === 'IND_AS';
 
   const vis    = lines.filter(l => !hidden[l.groupName]);
   const eq     = vis.filter(l => l.assetLiability === 'Equity');
   const liab   = vis.filter(l => l.assetLiability === 'Liabilities');
   const assets = vis.filter(l => l.assetLiability === 'Assets');
+  const other  = vis.filter(l => !['Equity','Liabilities','Assets','Income','Expenses'].includes(l.assetLiability));
 
-  // Split assets into Non-Current and Current by keywords
-  const ncaKw = ['property','plant','ppe','fixed asset','right-of-use','rou','intangible','goodwill',
-    'capital work','cwip','non-current invest','investment in associate','investment in subsidiary',
-    'deferred tax asset','long term loan','security deposit','other non-current'];
-  const caKw  = ['inventor','stock','trade receiv','trade and other receiv','account receiv','debtor',
-    'other receiv','prepay','prepaid','advance to','cash','bank','current invest','short-term invest',
-    'income tax receiv','vat receiv','gst receiv','other current','due from','provision for bad'];
-
-  const ncAssets = assets.filter(l => ncaKw.some(k => l.groupName?.toLowerCase().includes(k)));
-  const cAssets  = assets.filter(l => caKw.some(k => l.groupName?.toLowerCase().includes(k)));
-  const otherAssets = assets.filter(l =>
-    !ncaKw.some(k => l.groupName?.toLowerCase().includes(k)) &&
-    !caKw.some(k => l.groupName?.toLowerCase().includes(k))
-  );
-
-  // Split liabilities into Non-Current and Current
-  const nclKw = ['long term','long-term','non-current liab','deferred tax liab','lease liab',
-    'provision for gratuity','pension','bond','debenture','other long term','employee benefit liab'];
-  const clKw  = ['trade pay','trade and other pay','account pay','creditor','other pay','other current liab',
-    'accrual','short term borrow','short-term borrow','bank overdraft','overdraft',
-    'current lease','current borrow','short term prov','vat pay','gst pay','tax pay',
-    'directors loan','director loan','shareholder loan','advance from','dividend pay','duties'];
-
-  const ncLiab    = liab.filter(l => nclKw.some(k => l.groupName?.toLowerCase().includes(k)));
-  const cLiab     = liab.filter(l => clKw.some(k => l.groupName?.toLowerCase().includes(k)));
-  const otherLiab = liab.filter(l =>
-    !nclKw.some(k => l.groupName?.toLowerCase().includes(k)) &&
-    !clKw.some(k => l.groupName?.toLowerCase().includes(k))
-  );
-
-  const totalNCA   = [...ncAssets, ...otherAssets].reduce((s,l) => s + Number(l.totalFinalNet||0), 0);
-  const totalCA    = cAssets.reduce((s,l) => s + Number(l.totalFinalNet||0), 0);
-  const totalAssets = totalNCA + totalCA;
-  const totalEq    = eq.reduce((s,l) => s + Number(l.totalFinalNet||0), 0);
-  const totalNCL   = ncLiab.reduce((s,l) => s + Number(l.totalFinalNet||0), 0);
-  const totalCL    = [...cLiab, ...otherLiab].reduce((s,l) => s + Number(l.totalFinalNet||0), 0);
-  const totalLiab  = totalNCL + totalCL;
-  const totalEqLiab = totalEq + totalLiab;
-  const diff = totalAssets - totalEqLiab;
+  const totalEq     = eq.reduce((s,l)    => s + Number(l.totalFinalNet||0), 0);
+  const totalLiab   = liab.reduce((s,l)  => s + Number(l.totalFinalNet||0), 0);
+  const totalEqLiab = totalEq + totalLiab + other.reduce((s,l) => s + Number(l.totalFinalNet||0), 0);
+  const totalAssets = assets.reduce((s,l) => s + Number(l.totalFinalNet||0), 0);
+  const diff        = totalAssets - totalEqLiab;
 
   const Lines = ({ arr }) => arr.map((l,i) => (
-    <Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber}
-      amount={Number(l.totalFinalNet)} indent={2} divisor={D}
-      hideable onHide={() => onHide(l.groupName)} />
+    <Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)}
+      indent={2} divisor={D} hideable onHide={() => onHide(l.groupName)} />
   ));
-
-  // For AS/Ind AS: Equity & Liabilities first, then Assets
-  // For IFRS: Assets first, then Equity & Liabilities
-  const renderIFRS = () => (
-    <>
-      {/* ASSETS */}
-      <Row label="ASSETS" section />
-      <Row label="Non-Current Assets" subheader />
-      <Lines arr={[...ncAssets, ...otherAssets]} />
-      <Row label="Total Non-Current Assets" amount={totalNCA} bold borderTop divisor={D} />
-      <Row label="Current Assets" subheader />
-      <Lines arr={cAssets} />
-      <Row label="Total Current Assets" amount={totalCA} bold borderTop divisor={D} />
-      <Row label="TOTAL ASSETS" amount={totalAssets} bold borderTop divisor={D} />
-
-      {/* EQUITY AND LIABILITIES */}
-      <Row label="EQUITY AND LIABILITIES" section />
-      <Row label="Equity" subheader />
-      <Lines arr={eq} />
-      <Row label="Total Equity" amount={totalEq} bold borderTop divisor={D} />
-
-      {ncLiab.length > 0 && <>
-        <Row label="Non-Current Liabilities" subheader />
-        <Lines arr={ncLiab} />
-        <Row label="Total Non-Current Liabilities" amount={totalNCL} bold borderTop divisor={D} />
-      </>}
-
-      <Row label="Current Liabilities" subheader />
-      <Lines arr={[...cLiab, ...otherLiab]} />
-      <Row label="Total Current Liabilities" amount={totalCL} bold borderTop divisor={D} />
-
-      <Row label="TOTAL EQUITY AND LIABILITIES" amount={totalEqLiab} bold borderTop divisor={D} />
-    </>
-  );
-
-  const renderIndian = () => (
-    <>
-      {/* EQUITY AND LIABILITIES first for AS/Ind AS */}
-      <Row label="I. EQUITY AND LIABILITIES" section />
-      <Row label="(1) Shareholders' Funds / Equity" subheader />
-      <Lines arr={eq} />
-      <Row label="Total Equity" amount={totalEq} bold borderTop divisor={D} />
-
-      {ncLiab.length > 0 && <>
-        <Row label="(2) Non-Current Liabilities" subheader />
-        <Lines arr={ncLiab} />
-        <Row label="Total Non-Current Liabilities" amount={totalNCL} bold borderTop divisor={D} />
-      </>}
-
-      <Row label={`(${ncLiab.length > 0 ? '3' : '2'}) Current Liabilities`} subheader />
-      <Lines arr={[...cLiab, ...otherLiab]} />
-      <Row label="Total Current Liabilities" amount={totalCL} bold borderTop divisor={D} />
-      <Row label="TOTAL — EQUITY AND LIABILITIES" amount={totalEqLiab} bold borderTop divisor={D} />
-
-      {/* ASSETS */}
-      <Row label="II. ASSETS" section />
-      <Row label="(1) Non-Current Assets" subheader />
-      <Lines arr={[...ncAssets, ...otherAssets]} />
-      <Row label="Total Non-Current Assets" amount={totalNCA} bold borderTop divisor={D} />
-      <Row label="(2) Current Assets" subheader />
-      <Lines arr={cAssets} />
-      <Row label="Total Current Assets" amount={totalCA} bold borderTop divisor={D} />
-      <Row label="TOTAL — ASSETS" amount={totalAssets} bold borderTop divisor={D} />
-    </>
-  );
 
   return (
     <div>
       <div className="text-center mb-5">
         <h2 className="text-lg font-bold uppercase tracking-wide">{cfg.bsTitle}</h2>
         <p className="text-sm text-slate-500">as at 31st March</p>
-        <p className="text-xs text-slate-400 mt-0.5">
-          {currSymbol === 'INR' ? 'All amounts in ₹' : `All amounts in ${currSymbol}`}
-        </p>
+        <p className="text-xs text-slate-400 mt-0.5">All amounts in {currSymbol}</p>
         <p className="text-xs text-slate-400">{cfg.standard}</p>
       </div>
+
       <table className="w-full text-sm border border-slate-300 rounded-lg overflow-hidden">
         <thead>
           <tr className="bg-slate-800 text-white">
@@ -191,17 +90,46 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol }) {
           </tr>
         </thead>
         <tbody>
-          {isIFRS ? renderIFRS() : renderIndian()}
+          {/* ── EQUITY & LIABILITIES ── */}
+          <Row label={isIFRS ? 'EQUITY AND LIABILITIES' : 'I. EQUITY AND LIABILITIES'} section />
+
+          {eq.length > 0 && <>
+            <Row label="Equity" subheader />
+            <Lines arr={eq} />
+            <Row label="Total Equity" amount={totalEq} bold borderTop divisor={D} />
+          </>}
+
+          {liab.length > 0 && <>
+            <Row label="Liabilities" subheader />
+            <Lines arr={liab} />
+            <Row label="Total Liabilities" amount={totalLiab} bold borderTop divisor={D} />
+          </>}
+
+          {other.length > 0 && <>
+            <Row label="Other" subheader />
+            <Lines arr={other} />
+          </>}
+
+          <Row label={isIFRS ? 'TOTAL EQUITY AND LIABILITIES' : 'TOTAL — EQUITY AND LIABILITIES'} amount={totalEqLiab} bold borderTop divisor={D} />
+
+          {/* ── ASSETS ── */}
+          <Row label={isIFRS ? 'ASSETS' : 'II. ASSETS'} section />
+          {assets.length > 0
+            ? <Lines arr={assets} />
+            : <tr><td colSpan={4} className="px-3 py-4 text-slate-400 text-sm text-center italic">No asset lines — re-generate FS after fixing mappings</td></tr>}
+          <Row label={isIFRS ? 'TOTAL ASSETS' : 'TOTAL — ASSETS'} amount={totalAssets} bold borderTop divisor={D} />
         </tbody>
       </table>
 
+      {/* Balance check */}
       <div className={`mt-3 p-3 rounded-xl text-sm font-semibold text-right ${Math.abs(diff) < 1 ? 'bg-green-50 text-green-700 border border-green-200' : 'bg-red-50 text-red-700 border border-red-200'}`}>
         {Math.abs(diff) < 1
           ? '✓ Balance Sheet tallies — Assets = Equity + Liabilities'
           : <>
               ⚠ Difference: {fmt(Math.abs(diff), D)} — Balance Sheet does not balance
-              <div className="text-xs font-normal mt-1">
-                Assets: {fmt(totalAssets, D)} | Equity: {fmt(totalEq, D)} | Liabilities: {fmt(totalLiab, D)}
+              <div className="text-xs font-normal mt-1 text-red-600">
+                Assets: {fmt(totalAssets, D)} | Equity: {fmt(totalEq, D)} | Liabilities: {fmt(totalLiab, D)}<br/>
+                Fix: Check that liability/equity items are not mapped as assets. Re-generate FS after fixing.
               </div>
             </>
         }
@@ -212,64 +140,34 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol }) {
 
 // ── Profit & Loss ─────────────────────────────────────────────────────────────
 function PLStatement({ lines, method, divisor, currSymbol }) {
-  const cfg    = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
-  const D      = divisor;
+  const cfg   = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
+  const D     = divisor;
   const isIFRS = method === 'IFRS' || method === 'IFRS_SME';
 
-  const plLines  = lines.filter(l => l.sheet === 'PL');
-  const ociLines = lines.filter(l => l.sheet === 'OCI');
+  const incomeLines  = lines.filter(l => l.assetLiability === 'Income');
+  const expenseLines = lines.filter(l => l.assetLiability === 'Expenses' && l.sheet === 'PL');
+  const ociLines     = lines.filter(l => l.sheet === 'OCI');
 
-  // ── Categorise by keywords ───────────────────────────────────────────────
-  const isIncome  = l => l.assetLiability === 'Income';
-  const isExpense = l => l.assetLiability === 'Expenses';
+  // Gross Profit = Revenue - Cost of Sales
+  const revenue     = incomeLines.filter(l => ['revenue from operations','revenue from contracts','revenue','turnover','sales'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+  const otherIncome = incomeLines.filter(l => !['revenue from operations','revenue from contracts','revenue','turnover','sales'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+  const totalIncome = incomeLines.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
 
-  const revenueLines = plLines.filter(l => isIncome(l) &&
-    ['revenue from operations','revenue from contracts','revenue','turnover','sales'].some(k=>l.groupName?.toLowerCase().includes(k)));
-  const otherIncomeLines = plLines.filter(l => isIncome(l) &&
-    !['revenue from operations','revenue from contracts','revenue','turnover','sales'].some(k=>l.groupName?.toLowerCase().includes(k)));
-  const cosLines = plLines.filter(l => isExpense(l) &&
-    ['cost of sale','cost of good','cost of material','cost of revenue','purchase of stock','changes in inventor'].some(k=>l.groupName?.toLowerCase().includes(k)));
-  const finCostLines = plLines.filter(l => isExpense(l) &&
-    ['finance cost','interest expense','bank charge','bank interest','borrowing cost'].some(k=>l.groupName?.toLowerCase().includes(k)));
-  const deprLines = plLines.filter(l => isExpense(l) &&
-    ['depreciation','amortis','amortiz'].some(k=>l.groupName?.toLowerCase().includes(k)));
-  const taxLines = plLines.filter(l => isExpense(l) &&
-    ['tax expense','income tax expense','current tax','deferred tax expense'].some(k=>l.groupName?.toLowerCase().includes(k)));
-  const sellingLines = plLines.filter(l => isExpense(l) &&
-    ['selling','distribution','marketing','advertising'].some(k=>l.groupName?.toLowerCase().includes(k)) &&
-    !taxLines.includes(l) && !finCostLines.includes(l) && !cosLines.includes(l));
-  const adminLines = plLines.filter(l => isExpense(l) &&
-    !cosLines.includes(l) && !finCostLines.includes(l) && !deprLines.includes(l) &&
-    !taxLines.includes(l) && !sellingLines.includes(l));
+  const cos         = expenseLines.filter(l=>['cost of sale','cost of good','cost of material','purchase of stock','changes in inventor'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+  const totalExpense= expenseLines.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+  const taxExpense  = expenseLines.filter(l=>['tax expense','income tax'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
 
-  const sum = arr => arr.reduce((s,l) => s + Number(l.totalFinalNet||0), 0);
-
-  const totalRevenue      = sum(revenueLines);
-  const totalOtherIncome  = sum(otherIncomeLines);
-  const totalCOS          = sum(cosLines);
-  const grossProfit       = totalRevenue - totalCOS;
-  const totalSelling      = sum(sellingLines);
-  const totalAdmin        = sum(adminLines);
-  const totalDepr         = sum(deprLines);
-  const totalOpex         = totalSelling + totalAdmin + totalDepr;
-  const operatingProfit   = grossProfit + totalOtherIncome - totalOpex;
-  const totalFinCost      = sum(finCostLines);
-  const pbt               = operatingProfit - totalFinCost;
-  const totalTax          = sum(taxLines);
-  const pat               = pbt - totalTax;
-  const ociTotal          = sum(ociLines);
-  const totalCI           = pat + ociTotal;
-
-  const Blank = () => <tr><td colSpan={4} className="py-1.5 border-0"></td></tr>;
+  const grossProfit = revenue - cos;
+  const pat         = totalIncome - totalExpense;
+  const ociTotal    = ociLines.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+  const totalComprehensive = pat + ociTotal;
 
   return (
     <div>
       <div className="text-center mb-5">
         <h2 className="text-lg font-bold uppercase tracking-wide">{cfg.plTitle}</h2>
         <p className="text-sm text-slate-500">for the year ended 31st March</p>
-        <p className="text-xs text-slate-400 mt-0.5">
-          {currSymbol === 'INR' ? 'All amounts in ₹' : `All amounts in ${currSymbol}`}
-        </p>
+        <p className="text-xs text-slate-400 mt-0.5">All amounts in {currSymbol}</p>
         <p className="text-xs text-slate-400">{cfg.standard}</p>
       </div>
 
@@ -283,114 +181,48 @@ function PLStatement({ lines, method, divisor, currSymbol }) {
           </tr>
         </thead>
         <tbody>
-          {/* 1. REVENUE */}
-          <Row label="REVENUE" section />
-          {revenueLines.map((l,i)=><Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D} hideable/>)}
-          <Row label="Total Revenue" amount={totalRevenue} bold borderTop divisor={D} />
-          <Blank/>
+          <Row label="I. REVENUE / INCOME" section />
+          {incomeLines.map((l,i) => <Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D} hideable />)}
+          <Row label="Total Revenue (I)" amount={totalIncome} bold borderTop divisor={D} />
 
-          {/* 2. COST OF SALES */}
-          <Row label="Cost of Sales" subheader />
-          {cosLines.length > 0
-            ? cosLines.map((l,i)=><Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D} hideable/>)
-            : <Row label="Cost of Sales" amount={0} indent={2} divisor={D} />}
-          <Row label="Total Cost of Sales" amount={totalCOS} bold borderTop divisor={D} />
-          <Blank/>
+          <Row label="II. EXPENSES" section />
+          {expenseLines.map((l,i) => <Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D} hideable />)}
+          <Row label="Total Expenses (II)" amount={totalExpense} bold borderTop divisor={D} />
 
-          {/* 3. GROSS PROFIT */}
-          <Row label="GROSS PROFIT / (LOSS)" amount={grossProfit} bold borderTop divisor={D} />
-          <Blank/>
+          {/* Formula: Gross Profit */}
+          {cos > 0 && <Row label="Gross Profit (Revenue − Cost of Sales)" amount={grossProfit} bold borderTop divisor={D} />}
 
-          {/* 4. OTHER INCOME */}
-          {(otherIncomeLines.length > 0 || true) && <>
-            <Row label="Other Income" subheader />
-            {otherIncomeLines.length > 0
-              ? otherIncomeLines.map((l,i)=><Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D} hideable/>)
-              : <Row label="Other Income" amount={0} indent={2} divisor={D} />}
-            <Blank/>
-          </>}
+          <Row label="Profit / (Loss) Before Tax (I − II)" amount={pat + taxExpense} bold borderTop divisor={D} />
+          <Row label="Less: Income Tax Expense" amount={taxExpense} indent divisor={D} />
+          <Row label="Profit / (Loss) for the Year" amount={pat} bold borderTop divisor={D} />
 
-          {/* 5. OPERATING EXPENSES */}
-          <Row label="OPERATING EXPENSES" section />
-          {sellingLines.length > 0 && <>
-            <Row label="Distribution / Selling Expenses" subheader />
-            {sellingLines.map((l,i)=><Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D} hideable/>)}
-          </>}
-          {adminLines.length > 0 && <>
-            <Row label="Administrative Expenses" subheader />
-            {adminLines.map((l,i)=><Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D} hideable/>)}
-          </>}
-          {deprLines.length > 0 && <>
-            <Row label="Depreciation and Amortisation" subheader />
-            {deprLines.map((l,i)=><Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D} hideable/>)}
-          </>}
-          <Row label="Total Operating Expenses" amount={totalOpex} bold borderTop divisor={D} />
-          <Blank/>
-
-          {/* 6. OPERATING PROFIT */}
-          <Row label="OPERATING PROFIT / (LOSS)" amount={operatingProfit} bold borderTop divisor={D} />
-          <Blank/>
-
-          {/* 7. FINANCE COSTS (always show) */}
-          <Row label="Finance Costs" subheader />
-          {finCostLines.length > 0
-            ? finCostLines.map((l,i)=><Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D} hideable/>)
-            : <Row label="Finance Costs" amount={0} indent={2} divisor={D} />}
-          <Blank/>
-
-          {/* 8. PROFIT BEFORE TAX */}
-          <Row label="PROFIT / (LOSS) BEFORE TAX" amount={pbt} bold borderTop divisor={D} />
-          <Blank/>
-
-          {/* 9. TAX EXPENSE */}
-          <Row label="Tax Expense" subheader />
-          {taxLines.length > 0
-            ? taxLines.map((l,i)=><Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D}/>)
-            : <Row label="Income Tax Expense" amount={0} indent={2} divisor={D} />}
-          <Blank/>
-
-          {/* 10. PROFIT FOR THE YEAR */}
-          <Row label="PROFIT / (LOSS) FOR THE YEAR" amount={pat} bold borderTop divisor={D} />
-
-          {/* 11. OCI (IFRS / Ind AS) */}
+          {/* OCI for IFRS / Ind AS */}
           {cfg.hasOCI && <>
-            <Blank/>
-            <Row label="OTHER COMPREHENSIVE INCOME" section />
-            <Row label="Items not reclassified to profit or loss" subheader />
-            {ociLines.filter(l=>['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
-              <Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D}/>
-            ))}
-            <Row label="Items that may be reclassified to profit or loss" subheader />
-            {ociLines.filter(l=>!['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
-              <Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D}/>
-            ))}
-            {ociLines.length === 0 && (
-              <tr><td colSpan={4} className="px-10 py-1.5 text-xs text-slate-400 italic">No OCI items — map to OCI sheet in Mapping page if applicable</td></tr>
-            )}
-            <Row label="Total Other Comprehensive Income / (Loss)" amount={ociTotal} bold borderTop divisor={D} />
-            <Blank/>
-            <Row label="TOTAL COMPREHENSIVE INCOME FOR THE YEAR" amount={totalCI} bold borderTop divisor={D} />
+            <Row label="III. OTHER COMPREHENSIVE INCOME" section />
+            {ociLines.length > 0
+              ? ociLines.map((l,i) => <Row key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} indent={2} divisor={D} />)
+              : <tr><td colSpan={4} className="px-3 py-2 text-xs text-slate-400 italic">No OCI items — map items to OCI in Mapping page if applicable</td></tr>}
+            <Row label="Total Other Comprehensive Income (III)" amount={ociTotal} bold borderTop divisor={D} />
+            <Row label="Total Comprehensive Income for the Year (I − II + III)" amount={totalComprehensive} bold borderTop divisor={D} />
           </>}
 
-          <Blank/>
-          {/* 12. EPS */}
+          {/* EPS placeholder */}
           <Row label="Earnings Per Share (Face Value — see Note)" bold borderTop divisor={D} />
           <Row label="Basic EPS" amount={null} indent={2} divisor={D} />
           <Row label="Diluted EPS" amount={null} indent={2} divisor={D} />
         </tbody>
       </table>
 
-      {/* Summary cards */}
-      <div className="mt-4 grid grid-cols-4 gap-3">
+      {/* Formula Summary */}
+      <div className="mt-4 grid grid-cols-3 gap-3">
         {[
-          { label: 'Gross Profit',      value: grossProfit,     color: 'bg-blue-50 border-blue-200 text-blue-800' },
-          { label: 'Operating Profit',  value: operatingProfit, color: 'bg-indigo-50 border-indigo-200 text-indigo-800' },
-          { label: 'Profit Before Tax', value: pbt,             color: 'bg-amber-50 border-amber-200 text-amber-800' },
-          { label: 'Profit After Tax',  value: pat,             color: pat >= 0 ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800' },
+          { label: 'Total Revenue', value: totalIncome, color: 'bg-green-50 border-green-200 text-green-800' },
+          { label: 'Total Expenses', value: totalExpense, color: 'bg-red-50 border-red-200 text-red-800' },
+          { label: 'Net Profit / (Loss)', value: pat, color: pat >= 0 ? 'bg-indigo-50 border-indigo-200 text-indigo-800' : 'bg-red-50 border-red-200 text-red-800' },
         ].map(s => (
           <div key={s.label} className={`border rounded-xl p-3 ${s.color}`}>
             <div className="text-xs font-medium opacity-70">{s.label}</div>
-            <div className="text-base font-bold font-mono mt-1">{fmt(s.value, D)}</div>
+            <div className="text-lg font-bold font-mono mt-1">{fmt(s.value, D)}</div>
           </div>
         ))}
       </div>

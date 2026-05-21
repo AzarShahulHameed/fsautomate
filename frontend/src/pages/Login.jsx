@@ -17,7 +17,7 @@ export default function Login() {
     try {
       const res = await authAPI.login(form);
       setAuth(res.token, res.user, res.firm);
-      navigate('/', { replace: true });
+      navigate('/');
     } catch (err) {
       toast.error(err?.error || err?.message || 'Invalid email or password');
     } finally { setLoading(false); }
