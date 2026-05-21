@@ -38,10 +38,11 @@ app.use(helmet({
 // ─── CORS ──────────────────────────────────────────────────────────────────
 const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173').split(',');
 app.use(cors({
-  origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-    cb(new Error('Not allowed by CORS'));
-  },
+  origin: [
+    'http://localhost:5173',
+    process.env.FRONTEND_URL,
+    /\.vercel\.app$/,  // allows any vercel preview URL
+  ],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Firm-ID'],
