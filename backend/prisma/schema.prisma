@@ -1,0 +1,527 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ── Enums ─────────────────────────────────────────────────────────────────────
+enum Method {
+  AS
+  IND_AS
+  IFRS
+  IFRS_SME
+}
+
+enum MethodApplicability {
+  ALL
+  AS
+  IND_AS
+  IFRS
+  IFRS_SME
+}
+
+enum AssetLiability {
+  Assets
+  Liabilities
+  Income
+  Expenses
+  Equity
+}
+
+enum Role {
+  SUPER_ADMIN
+  FIRM_ADMIN
+  MANAGER
+  STAFF
+  VIEWER
+}
+
+enum ReportSectionType {
+  FIRST_PAGE
+  TABLE_OF_CONTENTS
+  DIRECTOR_REPORT
+  AUDITOR_REPORT
+  FINANCIAL_STATEMENTS
+  ACCOUNTING_POLICY
+  SUGGESTIONS
+  NOTES
+  THANK_YOU
+  CUSTOM
+}
+
+// ── Models ────────────────────────────────────────────────────────────────────
+model Firm {
+  id         String   @id @default(uuid())
+  name       String
+  slug       String   @unique
+  plan       String   @default("starter")
+  isActive   Boolean  @default(true)
+  region     String   @default("India")
+  currency   String   @default("INR")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  users      User[]
+  clients    Client[]
+}
+
+model User {
+  id           String        @id @default(uuid())
+  firmId       String
+  firm         Firm          @relation(fields: [firmId], references: [id])
+  email        String
+  passwordHash String
+  name         String
+  role         Role          @default(STAFF)
+  isActive     Boolean       @default(true)
+  avatar       String?
+  phone        String?
+  designation  String?
+  lastLoginAt  DateTime?
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  sessions     UserSession[]
+  auditLogs    AuditLog[]
+  engagements  EngagementUser[]
+
+  @@unique([firmId, email])
+  @@index([firmId])
+}
+
+model UserSession {
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  token       String   @unique
+  pageState   Json?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([token])
+  @@index([userId])
+}
+
+model Client {
+  id          String       @id @default(uuid())
+  firmId      String
+  firm        Firm         @relation(fields: [firmId], references: [id])
+  name        String
+  cin         String?
+  gstin       String?
+  pan         String?
+  address     String?
+  email       String?
+  phone       String?
+  country     String       @default("India")
+  region      String       @default("India")
+  tradeLicense String?
+  vatNumber   String?
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  engagements Engagement[]
+
+  @@index([firmId])
+}
+
+model Engagement {
+  id            String   @id @default(uuid())
+  clientId      String
+  client        Client   @relation(fields: [clientId], references: [id])
+  name          String
+  method        Method
+  financialYear String
+  currency      String   @default("INR")
+  isActive      Boolean  @default(true)
+  isLocked      Boolean  @default(false)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  users          EngagementUser[]
+  tbVersions     TBVersion[]
+  mappings       Mapping[]
+  fsLines        FSLine[]
+  noteGroups     NoteGroup[]
+  notesLines     NoteDetail[]
+  reportSections ReportSection[]
+  validationLogs ValidationLog[]
+  auditLogs      AuditLog[]
+  ppeClasses     PPEClass[]
+  intangibles    IntangibleClass[]
+  relatedParties RelatedParty[]
+  rpTransactions RPTransaction[]
+  epsData        EPSData?
+  dtItems        DeferredTaxItem[]
+  fiNote         FinancialInstrumentNote?
+  contingencies  Contingency[]
+
+  @@index([clientId])
+}
+
+model EngagementUser {
+  id           String     @id @default(uuid())
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  userId       String
+  user         User       @relation(fields: [userId], references: [id])
+  role         Role       @default(VIEWER)
+  createdAt    DateTime   @default(now())
+
+  @@unique([engagementId, userId])
+}
+
+model TBVersion {
+  id            String        @id @default(uuid())
+  engagementId  String
+  engagement    Engagement    @relation(fields: [engagementId], references: [id])
+  versionNumber Int
+  uploadedByRef String?
+  rowCount      Int           @default(0)
+  checksum      String?
+  isPriorYear   Boolean       @default(false)
+  label         String?
+  uploadedAt    DateTime      @default(now())
+  createdAt     DateTime      @default(now())
+  updatedAt     DateTime      @updatedAt
+  rows          TBRow[]
+  diffs         TBVersionDiff[]
+  fsLines       FSLine[]
+
+  @@index([engagementId])
+}
+
+model TBRow {
+  id            String    @id @default(uuid())
+  tbVersionId   String
+  tbVersion     TBVersion @relation(fields: [tbVersionId], references: [id])
+  engagementId  String
+  accountNumber String
+  accountName   String?
+  grouping      String?
+  subGrouping   String
+  debit         Decimal   @default(0) @db.Decimal(18,2)
+  credit        Decimal   @default(0) @db.Decimal(18,2)
+  net           Decimal   @default(0) @db.Decimal(18,2)
+  aje           Decimal   @default(0) @db.Decimal(18,2)
+  finalNet      Decimal   @default(0) @db.Decimal(18,2)
+  createdAt     DateTime  @default(now())
+
+  @@index([tbVersionId])
+  @@index([engagementId])
+  @@index([subGrouping])
+}
+
+model TBVersionDiff {
+  id            String    @id @default(uuid())
+  tbVersionId   String
+  tbVersion     TBVersion @relation(fields: [tbVersionId], references: [id])
+  accountNumber String
+  action        String
+  oldFinalNet   Decimal?  @db.Decimal(18,2)
+  newFinalNet   Decimal?  @db.Decimal(18,2)
+  fieldChanged  String?
+  createdAt     DateTime  @default(now())
+
+  @@index([tbVersionId])
+}
+
+model MasterGrouping {
+  id                  String             @id @default(uuid())
+  sheet               String
+  groupName           String
+  assetLiability      AssetLiability
+  subGroupNo          String             @unique
+  subGroupName        String
+  noteGroupId         String?
+  displayOrder        Int
+  methodApplicability MethodApplicability @default(ALL)
+  isActive            Boolean            @default(true)
+  createdAt           DateTime           @default(now())
+
+  @@index([groupName])
+  @@index([noteGroupId])
+  @@index([methodApplicability])
+  @@index([sheet])
+}
+
+model Mapping {
+  id               String     @id @default(uuid())
+  engagementId     String
+  engagement       Engagement @relation(fields: [engagementId], references: [id])
+  subGrouping      String
+  groupName        String
+  subGroupName     String?
+  subGroupNo       String?
+  noteGroupId      String?
+  masterGroupingId String?
+  isManual         Boolean    @default(false)
+  isSaved          Boolean    @default(true)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@unique([engagementId, subGrouping])
+  @@index([engagementId])
+}
+
+model NoteGroup {
+  id           String     @id @default(uuid())
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  noteGroupId  String
+  noteNumber   Int
+  title        String
+  isMandatory  Boolean    @default(false)
+  createdAt    DateTime   @default(now())
+  noteDetails  NoteDetail[]
+
+  @@unique([engagementId, noteGroupId])
+  @@index([engagementId])
+}
+
+model NoteDetail {
+  id            String     @id @default(uuid())
+  engagementId  String
+  engagement    Engagement @relation(fields: [engagementId], references: [id])
+  noteGroupId   String
+  noteGroup     NoteGroup  @relation(fields: [noteGroupId, engagementId], references: [noteGroupId, engagementId])
+  subGroupName  String?
+  subGroupNo    String?
+  accountNumber String?
+  accountName   String?
+  finalNet      Decimal    @default(0) @db.Decimal(18,2)
+  displayOrder  Int        @default(0)
+  createdAt     DateTime   @default(now())
+
+  @@index([engagementId])
+  @@index([noteGroupId])
+}
+
+model FSLine {
+  id             String     @id @default(uuid())
+  engagementId   String
+  engagement     Engagement @relation(fields: [engagementId], references: [id])
+  tbVersionId    String?
+  tbVersion      TBVersion? @relation(fields: [tbVersionId], references: [id])
+  sheet          String
+  groupName      String
+  totalFinalNet  Decimal    @default(0) @db.Decimal(18,2)
+  noteGroupId    String?
+  displayOrder   Int        @default(0)
+  assetLiability AssetLiability @default(Assets)
+  generatedAt    DateTime   @default(now())
+
+  @@index([engagementId])
+  @@index([sheet])
+}
+
+model ReportSection {
+  id           String            @id @default(uuid())
+  engagementId String
+  engagement   Engagement        @relation(fields: [engagementId], references: [id])
+  sectionType  ReportSectionType
+  title        String
+  content      String?
+  displayOrder Int
+  isVisible    Boolean           @default(true)
+  isEditable   Boolean           @default(true)
+  createdAt    DateTime          @default(now())
+  updatedAt    DateTime          @updatedAt
+
+  @@index([engagementId])
+}
+
+model ValidationLog {
+  id           String     @id @default(uuid())
+  engagementId String
+  engagement   Engagement @relation(fields: [engagementId], references: [id])
+  tbVersionId  String?
+  checkType    String
+  status       String
+  message      String
+  detail       Json?
+  createdAt    DateTime   @default(now())
+
+  @@index([engagementId])
+  @@index([checkType])
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  firmId     String
+  userId     String?
+  user       User?    @relation(fields: [userId], references: [id])
+  engagement Engagement? @relation(fields: [entityId], references: [id])
+  action     String
+  entityType String?
+  entityId   String?
+  ipAddress  String?
+  userAgent  String?
+  createdAt  DateTime @default(now())
+
+  @@index([firmId])
+  @@index([userId])
+}
+
+// ── Schedules ─────────────────────────────────────────────────────────────────
+model PPEClass {
+  id             String     @id @default(uuid())
+  engagementId   String
+  engagement     Engagement @relation(fields: [engagementId], references: [id])
+  assetClass     String
+  isDepreciable  Boolean    @default(true)
+  displayOrder   Int        @default(0)
+  openingGross   Decimal    @default(0) @db.Decimal(18,2)
+  additions      Decimal    @default(0) @db.Decimal(18,2)
+  disposals      Decimal    @default(0) @db.Decimal(18,2)
+  openingDepr    Decimal    @default(0) @db.Decimal(18,2)
+  deprForYear    Decimal    @default(0) @db.Decimal(18,2)
+  deprOnDisposal Decimal    @default(0) @db.Decimal(18,2)
+  revaluationAmt Decimal    @default(0) @db.Decimal(18,2)
+  impairmentAmt  Decimal    @default(0) @db.Decimal(18,2)
+  usefulLife     String?
+  method         String?
+  rate           Decimal?   @db.Decimal(6,2)
+  createdAt      DateTime   @default(now())
+  updatedAt      DateTime   @updatedAt
+
+  @@index([engagementId])
+}
+
+model IntangibleClass {
+  id              String     @id @default(uuid())
+  engagementId    String
+  engagement      Engagement @relation(fields: [engagementId], references: [id])
+  assetClass      String
+  displayOrder    Int        @default(0)
+  openingGross    Decimal    @default(0) @db.Decimal(18,2)
+  additions       Decimal    @default(0) @db.Decimal(18,2)
+  disposals       Decimal    @default(0) @db.Decimal(18,2)
+  openingAmort    Decimal    @default(0) @db.Decimal(18,2)
+  amortForYear    Decimal    @default(0) @db.Decimal(18,2)
+  amortOnDisposal Decimal    @default(0) @db.Decimal(18,2)
+  impairmentAmt   Decimal    @default(0) @db.Decimal(18,2)
+  usefulLife      String?
+  isIndefinite    Boolean    @default(false)
+  impairmentTest  Boolean    @default(false)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+
+  @@index([engagementId])
+}
+
+model RelatedParty {
+  id           String         @id @default(uuid())
+  engagementId String
+  engagement   Engagement     @relation(fields: [engagementId], references: [id])
+  name         String
+  relationship String
+  holdingPct   Decimal?       @db.Decimal(6,2)
+  panOrReg     String?
+  country      String         @default("India")
+  isActive     Boolean        @default(true)
+  transactions RPTransaction[]
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+
+  @@index([engagementId])
+}
+
+model RPTransaction {
+  id              String       @id @default(uuid())
+  engagementId    String
+  engagement      Engagement   @relation(fields: [engagementId], references: [id])
+  relatedPartyId  String
+  relatedParty    RelatedParty @relation(fields: [relatedPartyId], references: [id])
+  transactionType String
+  description     String?
+  amountCY        Decimal      @default(0) @db.Decimal(18,2)
+  amountPY        Decimal      @default(0) @db.Decimal(18,2)
+  outstandingDr   Decimal      @default(0) @db.Decimal(18,2)
+  outstandingCr   Decimal      @default(0) @db.Decimal(18,2)
+  isArmLength     Boolean      @default(true)
+  remarks         String?
+  salaryComp      Decimal      @default(0) @db.Decimal(18,2)
+  perquisites     Decimal      @default(0) @db.Decimal(18,2)
+  commission      Decimal      @default(0) @db.Decimal(18,2)
+  sittingFees     Decimal      @default(0) @db.Decimal(18,2)
+  pfContrib       Decimal      @default(0) @db.Decimal(18,2)
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+
+  @@index([engagementId])
+  @@index([relatedPartyId])
+}
+
+model EPSData {
+  id                String     @id @default(uuid())
+  engagementId      String     @unique
+  engagement        Engagement @relation(fields: [engagementId], references: [id])
+  patFromPL         Decimal    @default(0) @db.Decimal(18,2)
+  prefDividend      Decimal    @default(0) @db.Decimal(18,2)
+  weightedAvgShares Decimal    @default(0) @db.Decimal(18,2)
+  dilutiveShares    Decimal    @default(0) @db.Decimal(18,2)
+  faceValue         Decimal    @default(10) @db.Decimal(10,2)
+  patPY             Decimal    @default(0) @db.Decimal(18,2)
+  sharesPY          Decimal    @default(0) @db.Decimal(18,2)
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+}
+
+model DeferredTaxItem {
+  id            String     @id @default(uuid())
+  engagementId  String
+  engagement    Engagement @relation(fields: [engagementId], references: [id])
+  description   String
+  isAsset       Boolean    @default(true)
+  displayOrder  Int        @default(0)
+  openingDiff   Decimal    @default(0) @db.Decimal(18,2)
+  createdInPL   Decimal    @default(0) @db.Decimal(18,2)
+  reversedInPL  Decimal    @default(0) @db.Decimal(18,2)
+  createdInOCI  Decimal    @default(0) @db.Decimal(18,2)
+  reversedInOCI Decimal    @default(0) @db.Decimal(18,2)
+  taxRate       Decimal    @default(25) @db.Decimal(6,2)
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  @@index([engagementId])
+}
+
+model FinancialInstrumentNote {
+  id              String     @id @default(uuid())
+  engagementId    String     @unique
+  engagement      Engagement @relation(fields: [engagementId], references: [id])
+  creditRiskDesc  String?
+  maxExposure     Decimal    @default(0) @db.Decimal(18,2)
+  liabLt1yr       Decimal    @default(0) @db.Decimal(18,2)
+  liab1to3yr      Decimal    @default(0) @db.Decimal(18,2)
+  liab3to5yr      Decimal    @default(0) @db.Decimal(18,2)
+  liabGt5yr       Decimal    @default(0) @db.Decimal(18,2)
+  fixedRateAmt    Decimal    @default(0) @db.Decimal(18,2)
+  floatRateAmt    Decimal    @default(0) @db.Decimal(18,2)
+  foreignCurrExp  Decimal    @default(0) @db.Decimal(18,2)
+  foreignCurrDesc String?
+  level1Amt       Decimal    @default(0) @db.Decimal(18,2)
+  level2Amt       Decimal    @default(0) @db.Decimal(18,2)
+  level3Amt       Decimal    @default(0) @db.Decimal(18,2)
+  createdAt       DateTime   @default(now())
+  updatedAt       DateTime   @updatedAt
+}
+
+model Contingency {
+  id               String     @id @default(uuid())
+  engagementId     String
+  engagement       Engagement @relation(fields: [engagementId], references: [id])
+  contingencyType  String
+  category         String
+  description      String
+  amount           Decimal?   @db.Decimal(18,2)
+  remarks          String?
+  displayOrder     Int        @default(0)
+  createdAt        DateTime   @default(now())
+  updatedAt        DateTime   @updatedAt
+
+  @@index([engagementId])
+}

@@ -1,0 +1,77 @@
+version: '3.9'
+
+services:
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       finstatement_db
+      POSTGRES_USER:     finstatement_user
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-strongpassword}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U finstatement_user -d finstatement_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Redis (session store) ──────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ── Backend ────────────────────────────────────────────────────────────────
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      NODE_ENV:        production
+      PORT:            4000
+      DATABASE_URL:    postgresql://finstatement_user:${POSTGRES_PASSWORD:-strongpassword}@postgres:5432/finstatement_db
+      REDIS_URL:       redis://redis:6379
+      JWT_SECRET:      ${JWT_SECRET}
+      SESSION_SECRET:  ${SESSION_SECRET}
+      FRONTEND_URL:    ${FRONTEND_URL:-http://localhost:5173}
+    ports:
+      - "4000:4000"
+    volumes:
+      - uploads:/app/uploads
+
+  # ── Frontend (production build served by nginx) ────────────────────────────
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:4000}
+    restart: unless-stopped
+    depends_on:
+      - backend
+    ports:
+      - "80:80"
+
+volumes:
+  postgres_data:
+  redis_data:
+  uploads:
