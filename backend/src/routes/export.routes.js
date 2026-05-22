@@ -2,10 +2,10 @@
 'use strict';
 const router = require('express').Router();
 const { authGuard, engagementGuard } = require('../middleware/tenant');
-const { exportWord, exportExcel } = require('../services/export.service');
-
+const { exportWord, exportExcel, exportPDFData } = require('../services/export.service');
+ 
 router.use(authGuard);
-
+ 
 // GET /api/export/:engagementId/word
 router.get('/:engagementId/word', engagementGuard, async (req, res, next) => {
   try {
@@ -15,7 +15,7 @@ router.get('/:engagementId/word', engagementGuard, async (req, res, next) => {
     res.send(buffer);
   } catch (err) { next(err); }
 });
-
+ 
 // GET /api/export/:engagementId/excel
 router.get('/:engagementId/excel', engagementGuard, async (req, res, next) => {
   try {
@@ -25,5 +25,13 @@ router.get('/:engagementId/excel', engagementGuard, async (req, res, next) => {
     res.send(buffer);
   } catch (err) { next(err); }
 });
-
+ 
+// GET /api/export/:engagementId/pdf-data — returns data for client-side PDF
+router.get('/:engagementId/pdf-data', engagementGuard, async (req, res, next) => {
+  try {
+    const data = await exportPDFData(req.params.engagementId, req.firmId);
+    res.json(data);
+  } catch (err) { next(err); }
+});
+ 
 module.exports = router;

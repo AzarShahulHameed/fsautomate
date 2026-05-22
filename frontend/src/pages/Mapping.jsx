@@ -15,7 +15,7 @@ const UNITS = [
 function fmtAmt(n, divisor = 1) {
   const num = Number(n || 0) / divisor;
   const abs = Math.abs(num);
-  return (num < 0 ? '-' : '') + abs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  return (num < 0 ? '-' : '') + Math.round(abs).toLocaleString('en-IN');
 }
 
 // ── Searchable FS Head input with dropdown ────────────────────────────────────
@@ -112,11 +112,18 @@ function FSHeadInput({ value, onChange, options, currency }) {
 
 export default function Mapping() {
   const { engagementId } = useParams();
-  const { currentEngagement, firm } = useStore();
+  const { currentEngagement, currentClient, firm } = useStore();
   const navigate = useNavigate();
 
   const method   = currentEngagement?.method || 'AS';
-  const currency = firm?.currency || ((['IFRS','IFRS_SME'].includes(method)) ? 'AED' : 'INR');
+  // Currency: method is most authoritative (IFRS=AED, AS/IND_AS=INR)
+  const currency = (method === 'IFRS' || method === 'IFRS_SME')
+    ? 'AED'
+    : (method === 'AS' || method === 'IND_AS')
+    ? 'INR'
+    : (currentClient?.region === 'UAE' || currentClient?.country === 'UAE')
+    ? 'AED'
+    : 'INR';
   const currSymbol = currency === 'AED' ? 'AED' : '₹';
 
   const [tbRows,    setTbRows]    = useState([]);
@@ -128,7 +135,8 @@ export default function Mapping() {
   const [editDraft, setEditDraft] = useState({});
   const [search,    setSearch]    = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
-  const [unit,      setUnit]      = useState(UNITS[0]);
+  const [unit,        setUnit]        = useState(UNITS[0]);
+  const [customFSHeads, setCustomFSHeads] = useState([]);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -209,7 +217,14 @@ export default function Mapping() {
   });
 
   const allSubGroups = Object.values(subGroupTotals);
-  const uniqueGroups = [...new Set(master.map(m => m.groupName))].sort();
+
+  // Combine master grouping names + any custom FS heads already used in this engagement
+  const masterGroupNames = master.map(m => m.groupName);
+  const savedGroupNames  = Object.values(mappings)
+    .filter(m => m.groupName)
+    .map(m => m.groupName);
+  // Include custom FS heads added this session so they appear in dropdown immediately
+  const uniqueGroups = [...new Set([...masterGroupNames, ...savedGroupNames, ...customFSHeads])].sort();
 
   const filtered = allSubGroups.filter(sg => {
     const isMapped = !!mappings[sg.subGrouping]?.groupName;

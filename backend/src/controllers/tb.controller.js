@@ -9,11 +9,16 @@ exports.upload = async (req, res, next) => {
     if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const { engagementId } = req.params;
+    const isPriorYear = req.body.isPriorYear === 'true' || req.body.isPriorYear === true;
+    const label       = req.body.label || null;
+
     const version = await tbService.uploadTB(
       engagementId,
       req.firmId,
       req.file.buffer,
-      req.user.email
+      req.user.email,
+      isPriorYear,
+      label
     );
 
     // Auto-trigger mapping based on method
@@ -57,10 +62,16 @@ exports.getVersions = async (req, res, next) => {
 
 exports.getDiff = async (req, res, next) => {
   try {
-    const diffs = await require('../config/db').prisma.tBVersionDiff.findMany({
-      where: { tbVersionId: req.params.versionId },
-      orderBy: { action: 'asc' },
-    });
+    const { prisma } = require('../config/db');
+    // Use raw SQL to cast action enum to text (avoids Prisma enum mismatch)
+    const diffs = await prisma.$queryRawUnsafe(
+      `SELECT id, "tbVersionId", "accountNumber", "accountName",
+              action::text as action, "oldFinalNet", "newFinalNet", "fieldChanged", "createdAt"
+       FROM "TBVersionDiff"
+       WHERE "tbVersionId" = $1
+       ORDER BY action ASC, "accountNumber" ASC`,
+      req.params.versionId
+    );
     res.json(diffs);
   } catch (err) { next(err); }
 };

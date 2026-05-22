@@ -19,9 +19,13 @@ const notesRoutes         = require('./src/routes/notes.routes');
 const reportRoutes        = require('./src/routes/report.routes');
 const exportRoutes        = require('./src/routes/export.routes');
 const schedulesRoutes     = require('./src/routes/schedules.routes');
+const uploadRoutes        = require('./src/routes/upload.routes');
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
+
+// Required for Render/Vercel reverse proxy — fixes rate limiting and cookies
+app.set('trust proxy', 1);
 
 // ─── Security headers ──────────────────────────────────────────────────────
 app.use(helmet({
@@ -36,16 +40,29 @@ app.use(helmet({
 }));
 
 // ─── CORS ──────────────────────────────────────────────────────────────────
-const allowedOrigins = (process.env.FRONTEND_URL || 'http://localhost:5173').split(',');
+const allowedOrigins = [
+  'http://localhost:5173',
+  'http://localhost:3000',
+  ...(process.env.FRONTEND_URL ? process.env.FRONTEND_URL.split(',') : []),
+];
 app.use(cors({
   origin: (origin, cb) => {
-    if (!origin || allowedOrigins.includes(origin)) return cb(null, true);
-    cb(new Error('Not allowed by CORS'));
+    // Allow requests with no origin (mobile, Postman, server-to-server)
+    if (!origin) return cb(null, true);
+    // Allow any vercel.app subdomain
+    if (origin.endsWith('.vercel.app')) return cb(null, true);
+    // Allow any onrender.com subdomain
+    if (origin.endsWith('.onrender.com')) return cb(null, true);
+    // Allow explicit list
+    if (allowedOrigins.includes(origin)) return cb(null, true);
+    cb(new Error('Not allowed by CORS: ' + origin));
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'],
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-Firm-ID'],
 }));
+// Handle preflight for all routes
+app.options('*', cors());
 
 // ─── Body parsing ──────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
@@ -59,8 +76,8 @@ app.use(session({
   rolling: true,
   cookie: {
     httpOnly: true,
-    secure:   false,   // set true only with HTTPS in production
-    sameSite: 'lax',
+    secure:   process.env.NODE_ENV === 'production',
+    sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     maxAge:   8 * 60 * 60 * 1000, // 8 hours
   },
 }));
@@ -86,6 +103,7 @@ app.use('/api/notes',       notesRoutes);
 app.use('/api/report',      reportRoutes);
 app.use('/api/export',      exportRoutes);
 app.use('/api/schedules',   schedulesRoutes);
+app.use('/api/upload',      uploadRoutes);
 
 // ─── 404 ───────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

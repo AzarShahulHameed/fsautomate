@@ -85,13 +85,57 @@ module.exports = router;
 // PATCH /api/auth/profile
 router.patch('/profile', authGuard, async (req, res, next) => {
   try {
-    const { name, phone, designation, avatar } = req.body;
+    const { name, phone, designation, avatar, email } = req.body;
     const now = new Date();
+
+    const avatarVal = (avatar && avatar.trim().length > 0)
+      ? avatar.trim()
+      : req.user.avatar;
+
+    // If email is changing, check it's not already taken by another user
+    if (email && email !== req.user.email) {
+      const existing = await prisma.$queryRawUnsafe(
+        `SELECT id FROM "User" WHERE email=$1 AND id != $2 LIMIT 1`,
+        email.toLowerCase().trim(), req.user.id
+      );
+      if (existing.length) return res.status(400).json({ error: 'Email already in use by another account' });
+    }
+
+    const emailVal = (email && email.trim().length > 0) ? email.toLowerCase().trim() : req.user.email;
+
     await prisma.$executeRawUnsafe(
-      `UPDATE "User" SET name=$1, phone=$2, designation=$3, avatar=$4, "updatedAt"=$5 WHERE id=$6`,
-      name || req.user.name, phone || null, designation || null, avatar || null, now, req.user.id
+      `UPDATE "User" SET name=$1, phone=$2, designation=$3, avatar=$4, email=$5, "updatedAt"=$6 WHERE id=$7`,
+      name || req.user.name,
+      phone !== undefined ? (phone || null) : req.user.phone,
+      designation !== undefined ? (designation || null) : req.user.designation,
+      avatarVal || null,
+      emailVal,
+      now, req.user.id
     );
-    res.json({ message: 'Profile updated' });
+    res.json({ message: 'Profile updated', avatar: avatarVal, email: emailVal });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/auth/firm — update firm name and region
+router.patch('/firm', authGuard, async (req, res, next) => {
+  try {
+    const { name, region } = req.body;
+    if (!name || !name.trim()) return res.status(400).json({ error: 'Firm name is required' });
+
+    const currency = (region === 'UAE') ? 'AED' : 'INR';
+    const now = new Date();
+
+    await prisma.$executeRawUnsafe(
+      `UPDATE "Firm" SET name=$1, region=$2, currency=$3, "updatedAt"=$4 WHERE id=$5`,
+      name.trim(), region || 'India', currency, now, req.user.firmId
+    );
+
+    const updated = await prisma.$queryRawUnsafe(
+      `SELECT id, name, slug, region, currency FROM "Firm" WHERE id=$1 LIMIT 1`,
+      req.user.firmId
+    );
+
+    res.json({ message: 'Firm updated', firm: updated[0] });
   } catch (err) { next(err); }
 });
 
@@ -99,6 +143,9 @@ router.patch('/profile', authGuard, async (req, res, next) => {
 router.patch('/password', authGuard, async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;
+    if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Current and new password required' });
+    if (newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
+
     const users = await prisma.$queryRawUnsafe(
       `SELECT "passwordHash" FROM "User" WHERE id=$1`, req.user.id
     );

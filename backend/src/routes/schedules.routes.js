@@ -56,14 +56,22 @@ router.get('/:engagementId/ppe', engagementGuard, async (req, res, next) => {
       return res.json(await prisma.pPEClass.findMany({ where: { engagementId: req.params.engagementId }, orderBy: { displayOrder: 'asc' } }));
     }
     res.json(items);
-  } catch (err) { next(err); }
+  } catch (err) { 
+    console.error('[PPE GET Error]', err.message, err.code);
+    next(err); 
+  }
 });
 
 router.put('/:engagementId/ppe/:id', engagementGuard, async (req, res, next) => {
   try {
-    const r = await prisma.pPEClass.updateMany({
+    const { assetClass, isDepreciable, displayOrder, openingGross, additions, disposals,
+            openingDepr, deprForYear, deprOnDisposal, revaluationAmt, impairmentAmt,
+            usefulLife, method, rate } = req.body;
+    await prisma.pPEClass.updateMany({
       where: { id: req.params.id, engagementId: req.params.engagementId },
-      data: { ...req.body, updatedAt: new Date() },
+      data: { assetClass, isDepreciable, displayOrder, openingGross, additions, disposals,
+              openingDepr, deprForYear, deprOnDisposal, revaluationAmt, impairmentAmt,
+              usefulLife, method, rate, updatedAt: new Date() },
     });
     res.json({ saved: true });
   } catch (err) { next(err); }
@@ -113,9 +121,14 @@ router.get('/:engagementId/intangibles', engagementGuard, async (req, res, next)
 
 router.put('/:engagementId/intangibles/:id', engagementGuard, async (req, res, next) => {
   try {
+    const { assetClass, displayOrder, openingGross, additions, disposals,
+            openingAmort, amortForYear, amortOnDisposal, impairmentAmt,
+            usefulLife, isIndefinite, impairmentTest } = req.body;
     await prisma.intangibleClass.updateMany({
       where: { id: req.params.id, engagementId: req.params.engagementId },
-      data: { ...req.body, updatedAt: new Date() },
+      data: { assetClass, displayOrder, openingGross, additions, disposals,
+              openingAmort, amortForYear, amortOnDisposal, impairmentAmt,
+              usefulLife, isIndefinite, impairmentTest, updatedAt: new Date() },
     });
     res.json({ saved: true });
   } catch (err) { next(err); }
@@ -161,9 +174,10 @@ router.post('/:engagementId/related-parties', engagementGuard, async (req, res, 
 
 router.put('/:engagementId/related-parties/:id', engagementGuard, async (req, res, next) => {
   try {
+    const { name, relationship, holdingPct, panOrReg, country, isActive } = req.body;
     await prisma.relatedParty.updateMany({
       where: { id: req.params.id, engagementId: req.params.engagementId },
-      data: { ...req.body, updatedAt: new Date() },
+      data: { name, relationship, holdingPct, panOrReg, country, isActive, updatedAt: new Date() },
     });
     res.json({ saved: true });
   } catch (err) { next(err); }
@@ -189,9 +203,12 @@ router.post('/:engagementId/related-parties/:partyId/transactions', engagementGu
 
 router.put('/:engagementId/transactions/:id', engagementGuard, async (req, res, next) => {
   try {
+    const { transactionType, description, amountCY, amountPY, outstandingDr,
+            outstandingCr, isArmLength, remarks } = req.body;
     await prisma.rPTransaction.updateMany({
       where: { id: req.params.id, engagementId: req.params.engagementId },
-      data: { ...req.body, updatedAt: new Date() },
+      data: { transactionType, description, amountCY, amountPY, outstandingDr,
+              outstandingCr, isArmLength, remarks, updatedAt: new Date() },
     });
     res.json({ saved: true });
   } catch (err) { next(err); }
@@ -267,9 +284,12 @@ router.post('/:engagementId/deferred-tax', engagementGuard, async (req, res, nex
 
 router.put('/:engagementId/deferred-tax/:id', engagementGuard, async (req, res, next) => {
   try {
+    const { description, isAsset, displayOrder, openingDiff, createdInPL,
+            reversedInPL, createdInOCI, reversedInOCI, taxRate } = req.body;
     await prisma.deferredTaxItem.updateMany({
       where: { id: req.params.id, engagementId: req.params.engagementId },
-      data: { ...req.body, updatedAt: new Date() },
+      data: { description, isAsset, displayOrder, openingDiff, createdInPL,
+              reversedInPL, createdInOCI, reversedInOCI, taxRate, updatedAt: new Date() },
     });
     res.json({ saved: true });
   } catch (err) { next(err); }
@@ -327,9 +347,10 @@ router.post('/:engagementId/contingencies', engagementGuard, async (req, res, ne
 
 router.put('/:engagementId/contingencies/:id', engagementGuard, async (req, res, next) => {
   try {
+    const { contingencyType, category, description, amount, remarks, displayOrder } = req.body;
     await prisma.contingency.updateMany({
       where: { id: req.params.id, engagementId: req.params.engagementId },
-      data: { ...req.body, updatedAt: new Date() },
+      data: { contingencyType, category, description, amount, remarks, displayOrder, updatedAt: new Date() },
     });
     res.json({ saved: true });
   } catch (err) { next(err); }

@@ -16,7 +16,7 @@ const METHOD_COLOR = {
 };
 
 function Avatar({ user }) {
-  if (user?.avatar) return <img src={user.avatar} alt={user.name} className="w-10 h-10 rounded-full object-cover ring-2 ring-white/30" />;
+  if (user?.avatar) return <img src={user.avatar} alt={user.name} className="w-14 h-14 rounded-2xl object-cover ring-2 ring-white/30 shadow-md" />;
   return (
     <div className="w-10 h-10 rounded-full bg-white/20 backdrop-blur flex items-center justify-center text-white font-bold text-base ring-2 ring-white/30">
       {user?.name?.charAt(0)?.toUpperCase() || 'U'}

@@ -27,7 +27,9 @@ export default function Notes() {
 
   const method     = currentEngagement?.method || 'AS';
   const region     = currentClient?.region || (currentClient?.country === 'UAE' ? 'UAE' : firm?.region || 'India');
-  const currency   = region === 'UAE' || method === 'IFRS' || method === 'IFRS_SME' ? 'AED' : 'INR';
+  const currency   = (method === 'IFRS' || method === 'IFRS_SME') ? 'AED'
+    : (method === 'AS' || method === 'IND_AS') ? 'INR'
+    : (currentClient?.region === 'UAE') ? 'AED' : 'INR';
   const currSymbol = currency === 'AED' ? 'AED' : '₹';
 
   const UNITS = [
@@ -66,7 +68,7 @@ export default function Notes() {
   function fmt(n) {
     const num = Number(n || 0) / unit.value;
     const abs = Math.abs(num);
-    const s   = abs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    const s   = Math.round(abs).toLocaleString('en-IN');
     return num < 0 ? `(${s})` : s;
   }
 

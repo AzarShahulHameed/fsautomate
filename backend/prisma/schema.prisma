@@ -3,8 +3,9 @@ generator client {
 }
 
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 // ── Enums ─────────────────────────────────────────────────────────────────────
@@ -219,6 +220,7 @@ model TBVersionDiff {
   tbVersionId   String
   tbVersion     TBVersion @relation(fields: [tbVersionId], references: [id])
   accountNumber String
+  accountName   String?
   action        String
   oldFinalNet   Decimal?  @db.Decimal(18,2)
   newFinalNet   Decimal?  @db.Decimal(18,2)
@@ -257,6 +259,7 @@ model Mapping {
   subGroupNo       String?
   noteGroupId      String?
   masterGroupingId String?
+  displayOrder     Int?
   isManual         Boolean    @default(false)
   isSaved          Boolean    @default(true)
   createdAt        DateTime   @default(now())

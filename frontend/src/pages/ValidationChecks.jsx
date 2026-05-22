@@ -27,7 +27,7 @@ const STATUS_CONFIG = {
 function fmtNum(n) {
   const num = Number(n || 0);
   const abs = Math.abs(num);
-  const s = abs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const s = Math.round(abs).toLocaleString('en-IN');
   return num < 0 ? `(${s})` : s;
 }
 

@@ -1,7 +1,24 @@
+# Dependencies
 node_modules/
+*/node_modules/
+
+# Environment files — NEVER commit these
 .env
+backend/.env
+frontend/.env
+*.env.local
+
+# Build output
 dist/
+build/
 *.log
-logs/
-uploads/
+
+# OS files
 .DS_Store
+Thumbs.db
+
+# Prisma
+backend/prisma/migrations/
+
+# Uploads
+backend/uploads/

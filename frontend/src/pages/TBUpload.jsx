@@ -5,15 +5,11 @@ import { tbAPI } from '../api/client';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
 
-const fmt = n => {
-  const num = Math.abs(Number(n || 0));
-  return num.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-};
+const fmtN = n => Math.round(Math.abs(Number(n||0))).toLocaleString('en-IN');
+const fmtDate = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
 
 // ── Drop Zone ─────────────────────────────────────────────────────────────────
-function DropZone({ onUpload, uploading, isPriorYear }) {
-  const [label, setLabel] = useState('');
-
+function DropZone({ onUpload, uploading, isPriorYear, label, setLabel }) {
   const onDrop = useCallback(async (files) => {
     if (!files[0]) return;
     await onUpload(files[0], isPriorYear, label || null);
@@ -30,48 +26,37 @@ function DropZone({ onUpload, uploading, isPriorYear }) {
     disabled: uploading,
   });
 
+  const color = isPriorYear ? 'amber' : 'indigo';
+
   return (
     <div>
       {isPriorYear && (
         <div className="mb-3">
-          <label className="block text-xs font-semibold text-slate-600 mb-1.5">
-            Version Label <span className="text-slate-400 font-normal">(optional)</span>
-          </label>
-          <input
-            value={label}
-            onChange={e => setLabel(e.target.value)}
-            placeholder="e.g. Prior Year — FY 2023-24"
-            className="w-full border border-slate-300 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-          />
+          <label className="block text-xs font-semibold text-slate-600 mb-1.5">Version Label <span className="text-slate-400 font-normal">(optional)</span></label>
+          <input value={label} onChange={e => setLabel(e.target.value)}
+            placeholder={`e.g. Prior Year — FY 2023-24`}
+            className="w-full border border-slate-200 rounded-xl px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-amber-400" />
         </div>
       )}
-      <div
-        {...getRootProps()}
-        className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all ${
-          uploading ? 'opacity-50 cursor-not-allowed border-slate-200' :
-          isDragActive
-            ? (isPriorYear ? 'border-amber-400 bg-amber-50' : 'border-indigo-400 bg-indigo-50')
-            : (isPriorYear ? 'border-amber-200 hover:border-amber-300 hover:bg-amber-50' : 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50')
-        }`}
-      >
+      <div {...getRootProps()} className={`border-2 border-dashed rounded-2xl p-10 text-center cursor-pointer transition-all ${
+        uploading ? 'opacity-50 cursor-not-allowed border-slate-200' :
+        isDragActive ? `border-${color}-400 bg-${color}-50` :
+        isPriorYear ? 'border-amber-200 hover:border-amber-300 hover:bg-amber-50' : 'border-slate-200 hover:border-indigo-300 hover:bg-slate-50'
+      }`}>
         <input {...getInputProps()} />
         <div className="text-4xl mb-3">{isPriorYear ? '📋' : '📊'}</div>
         {uploading ? (
           <div>
-            <p className={`font-semibold ${isPriorYear ? 'text-amber-600' : 'text-indigo-600'}`}>
-              Uploading and parsing...
-            </p>
+            <p className={`font-semibold text-${color}-600`}>Uploading and parsing...</p>
             <div className="mt-2 w-32 mx-auto h-1 bg-slate-200 rounded-full overflow-hidden">
-              <div className={`h-full rounded-full animate-pulse ${isPriorYear ? 'bg-amber-400' : 'bg-indigo-500'}`} style={{width:'60%'}}/>
+              <div className={`h-full bg-${color}-400 rounded-full animate-pulse`} style={{width:'60%'}} />
             </div>
           </div>
         ) : isDragActive ? (
           <p className="font-semibold text-slate-700">Drop file to upload</p>
         ) : (
           <>
-            <p className="font-semibold text-slate-700">
-              {isPriorYear ? 'Drop Prior Year TB here' : 'Drag & drop your TB file here'}
-            </p>
+            <p className="font-semibold text-slate-700">{isPriorYear ? 'Drop Prior Year TB here' : 'Drag & drop TB file here'}</p>
             <p className="text-slate-400 text-sm mt-1">or click to browse — .xlsx, .xls or .csv</p>
           </>
         )}
@@ -80,184 +65,96 @@ function DropZone({ onUpload, uploading, isPriorYear }) {
   );
 }
 
-// ── TB Format Guide ────────────────────────────────────────────────────────────
-function FormatGuide({ currency }) {
-  return (
-    <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4">
-      <div className="flex items-start gap-3">
-        <span className="text-blue-500 text-xl flex-shrink-0">ℹ️</span>
-        <div>
-          <p className="font-semibold text-blue-900 text-sm">Required TB Format</p>
-          <p className="text-blue-800 text-xs mt-1">Your Excel/CSV must have these column headers (case-insensitive):</p>
-          <div className="mt-2 overflow-x-auto">
-            <table className="text-xs border-collapse">
-              <thead>
-                <tr className="bg-blue-100">
-                  {['Account No.','Account Name','Sub-Grouping','Debit','Credit','Net','AJE','Final Net'].map(h => (
-                    <th key={h} className="border border-blue-200 px-2 py-1 text-blue-800 whitespace-nowrap font-semibold">{h}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="bg-white">
-                  {['1001','Cash in Hand','Cash in Bank',`${currency} 0`,`${currency} 0`,`${currency} 0`,`${currency} 0`,`${currency} 5,000`].map((v,i) => (
-                    <td key={i} className="border border-blue-200 px-2 py-1 text-blue-700">{v}</td>
-                  ))}
-                </tr>
-              </tbody>
-            </table>
-          </div>
-          <p className="text-blue-700 text-xs mt-2">
-            <strong>Final Net</strong> = Net + AJE (audit adjustments). This is the amount used for financial statements.
-            All amounts in <strong>{currency}</strong>.
-          </p>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Version Card ──────────────────────────────────────────────────────────────
-function VersionCard({ version, isLatest, onViewDiff, diffLoading }) {
-  const isPY = version.isPriorYear;
-  return (
-    <div className={`bg-white border rounded-2xl p-4 transition-all hover:shadow-sm ${
-      isLatest && !isPY ? 'border-indigo-200 bg-indigo-50/30' : isPY ? 'border-amber-200 bg-amber-50/30' : 'border-slate-200'
-    }`}>
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className={`w-10 h-10 rounded-xl flex items-center justify-center font-bold text-sm ${
-            isPY ? 'bg-amber-100 text-amber-700' : isLatest ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'
-          }`}>
-            {isPY ? 'PY' : `V${version.versionNumber}`}
-          </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="font-semibold text-slate-800 text-sm">
-                {version.label || (isPY ? 'Prior Year TB' : `Version ${version.versionNumber}`)}
-              </span>
-              {isLatest && !isPY && (
-                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700">Latest</span>
-              )}
-              {isPY && (
-                <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">Prior Year</span>
-              )}
-            </div>
-            <div className="flex items-center gap-3 mt-0.5">
-              <span className="text-xs text-slate-500">{version.rowCount?.toLocaleString()} rows</span>
-              <span className="text-xs text-slate-400">
-                {new Date(version.uploadedAt || version.createdAt).toLocaleString('en-IN', {
-                  day:'2-digit', month:'short', year:'numeric',
-                  hour:'2-digit', minute:'2-digit'
-                })}
-              </span>
-            </div>
-          </div>
-        </div>
-        {!isPY && (
-          <button
-            onClick={() => onViewDiff(version.id)}
-            disabled={diffLoading === version.id}
-            className="px-3 py-1.5 border border-slate-300 text-slate-600 text-xs rounded-lg hover:bg-slate-50 hover:border-indigo-300 transition-all"
-          >
-            {diffLoading === version.id ? '⏳ Loading...' : '🔍 View Changes'}
-          </button>
-        )}
-      </div>
-    </div>
-  );
-}
-
 // ── Diff Viewer ───────────────────────────────────────────────────────────────
-function DiffViewer({ diff, onClose, currency }) {
+function DiffViewer({ version, currency, onClose }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
 
-  if (!diff) return null;
-
-  const changes = diff.changes || diff || [];
-  const filtered = changes.filter(c => {
-    if (filter === 'added'   && c.action !== 'ADDED')   return false;
-    if (filter === 'removed' && c.action !== 'REMOVED') return false;
-    if (filter === 'changed' && c.action !== 'CHANGED') return false;
-    if (search && !c.accountNumber?.toLowerCase().includes(search.toLowerCase()) &&
-        !c.accountName?.toLowerCase().includes(search.toLowerCase())) return false;
+  const diffs = version?.diffs || [];
+  const filtered = diffs.filter(d => {
+    if (filter !== 'all' && d.action?.toUpperCase() !== filter.toUpperCase()) return false;
+    if (search) {
+      const s = search.toLowerCase();
+      return d.accountNumber?.toLowerCase().includes(s) || d.accountName?.toLowerCase().includes(s);
+    }
     return true;
   });
 
   const counts = {
-    added:   changes.filter(c => c.action === 'ADDED').length,
-    removed: changes.filter(c => c.action === 'REMOVED').length,
-    changed: changes.filter(c => c.action === 'CHANGED').length,
+    ADDED:   diffs.filter(d => d.action === 'ADDED').length,
+    DELETED: diffs.filter(d => d.action === 'DELETED').length,
+    CHANGED: diffs.filter(d => d.action === 'CHANGED').length,
   };
 
+  if (!diffs.length) return (
+    <div className="bg-slate-800 rounded-2xl p-6 text-center">
+      <p className="text-slate-400">No changes recorded for this version — it was the first upload.</p>
+      <button onClick={onClose} className="mt-4 px-4 py-2 bg-slate-600 text-white text-sm rounded-xl">Close</button>
+    </div>
+  );
+
   return (
-    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-xl">
-      <div className="flex items-center justify-between px-5 py-4 bg-slate-800 text-white">
+    <div className="bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl">
+      {/* Header */}
+      <div className="flex items-center justify-between px-5 py-4 bg-slate-800 border-b border-slate-700">
         <div>
-          <h3 className="font-semibold">Version Comparison</h3>
+          <h3 className="font-bold text-white">Version {version.versionNumber} — Changes</h3>
           <p className="text-slate-400 text-xs mt-0.5">
-            {changes.length} changes — {counts.added} added · {counts.removed} removed · {counts.changed} modified
+            {diffs.length} changes · {counts.ADDED} added · {counts.DELETED} deleted · {counts.CHANGED} modified
           </p>
         </div>
-        <button onClick={onClose} className="text-slate-400 hover:text-white text-xl transition-colors">✕</button>
+        <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
       </div>
 
-      {/* Summary pills */}
-      <div className="flex items-center gap-3 px-5 py-3 bg-slate-50 border-b border-slate-200">
+      {/* Filters */}
+      <div className="flex items-center gap-3 px-5 py-3 bg-slate-800/50 border-b border-slate-700 flex-wrap">
         {[
-          { key:'all',     label:`All (${changes.length})`,         bg:'bg-slate-700 text-white',    off:'bg-white text-slate-600 border border-slate-300' },
-          { key:'added',   label:`Added (${counts.added})`,         bg:'bg-emerald-600 text-white',  off:'bg-emerald-50 text-emerald-700 border border-emerald-200' },
-          { key:'removed', label:`Removed (${counts.removed})`,     bg:'bg-red-600 text-white',      off:'bg-red-50 text-red-700 border border-red-200' },
-          { key:'changed', label:`Modified (${counts.changed})`,    bg:'bg-amber-500 text-white',    off:'bg-amber-50 text-amber-700 border border-amber-200' },
+          { key:'all',     label:`All (${diffs.length})`,         cls:'bg-slate-600 text-white',   off:'bg-slate-800 text-slate-400 border border-slate-600' },
+          { key:'ADDED',   label:`Added (${counts.ADDED})`,       cls:'bg-emerald-700 text-white', off:'bg-emerald-900/30 text-emerald-400 border border-emerald-700' },
+          { key:'DELETED', label:`Deleted (${counts.DELETED})`,   cls:'bg-red-700 text-white',     off:'bg-red-900/30 text-red-400 border border-red-700' },
+          { key:'CHANGED', label:`Modified (${counts.CHANGED})`,  cls:'bg-amber-700 text-white',   off:'bg-amber-900/30 text-amber-400 border border-amber-700' },
         ].map(b => (
           <button key={b.key} onClick={() => setFilter(b.key)}
-            className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all ${filter === b.key ? b.bg : b.off}`}>
+            className={`px-3 py-1.5 rounded-lg text-xs font-semibold ${filter === b.key ? b.cls : b.off}`}>
             {b.label}
           </button>
         ))}
-        <input
-          value={search} onChange={e => setSearch(e.target.value)}
+        <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search account..."
-          className="ml-auto border border-slate-200 rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:ring-2 focus:ring-indigo-400 w-48"
-        />
+          className="ml-auto bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500 w-44 placeholder-slate-500" />
       </div>
 
+      {/* Table */}
       <div className="overflow-auto max-h-96">
         {filtered.length === 0 ? (
-          <div className="py-10 text-center text-slate-400">No changes match your filter</div>
+          <div className="py-10 text-center text-slate-500">No changes match your filter</div>
         ) : (
           <table className="w-full text-xs">
-            <thead className="sticky top-0 bg-slate-50 border-b border-slate-200">
+            <thead className="sticky top-0 bg-slate-800 border-b border-slate-700">
               <tr>
-                <th className="text-left px-4 py-2 font-semibold text-slate-600">Change</th>
-                <th className="text-left px-4 py-2 font-semibold text-slate-600">Account</th>
-                <th className="text-left px-4 py-2 font-semibold text-slate-600">Name</th>
-                <th className="text-right px-4 py-2 font-semibold text-slate-600">Old Amount ({currency})</th>
-                <th className="text-right px-4 py-2 font-semibold text-slate-600">New Amount ({currency})</th>
-                <th className="text-right px-4 py-2 font-semibold text-slate-600">Δ Difference</th>
+                <th className="text-left px-4 py-2.5 text-slate-400 font-semibold">Status</th>
+                <th className="text-left px-4 py-2.5 text-slate-400 font-semibold">Account No.</th>
+                <th className="text-left px-4 py-2.5 text-slate-400 font-semibold">Account Name</th>
+                <th className="text-right px-4 py-2.5 text-slate-400 font-semibold">Old ({currency})</th>
+                <th className="text-right px-4 py-2.5 text-slate-400 font-semibold">New ({currency})</th>
+                <th className="text-right px-4 py-2.5 text-slate-400 font-semibold">Change</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-100">
-              {filtered.map((c, i) => {
-                const diff = Number(c.newFinalNet || 0) - Number(c.oldFinalNet || 0);
-                const rowBg = c.action === 'ADDED' ? 'bg-emerald-50' : c.action === 'REMOVED' ? 'bg-red-50' : c.action === 'CHANGED' ? 'bg-amber-50' : '';
-                const badge = c.action === 'ADDED' ? 'bg-emerald-100 text-emerald-700' : c.action === 'REMOVED' ? 'bg-red-100 text-red-700' : 'bg-amber-100 text-amber-700';
+            <tbody className="divide-y divide-slate-800">
+              {filtered.map((d, i) => {
+                const action = (d.action || '').toUpperCase();
+                const diff   = Number(d.newFinalNet || 0) - Number(d.oldFinalNet || 0);
+                const rowBg  = action === 'ADDED' ? 'bg-emerald-900/20' : action === 'DELETED' ? 'bg-red-900/20' : action === 'CHANGED' ? 'bg-amber-900/20' : '';
+                const badge  = action === 'ADDED' ? 'bg-emerald-800 text-emerald-300' : action === 'DELETED' ? 'bg-red-800 text-red-300' : 'bg-amber-800 text-amber-300';
                 return (
-                  <tr key={i} className={`hover:brightness-95 ${rowBg}`}>
-                    <td className="px-4 py-2.5">
-                      <span className={`px-2 py-0.5 rounded-full font-bold ${badge}`}>{c.action}</span>
-                    </td>
-                    <td className="px-4 py-2.5 font-mono text-slate-600">{c.accountNumber}</td>
-                    <td className="px-4 py-2.5 text-slate-700">{c.accountName || c.fieldChanged || '—'}</td>
-                    <td className="px-4 py-2.5 text-right font-mono text-slate-500">
-                      {c.oldFinalNet !== undefined && c.oldFinalNet !== null ? fmt(c.oldFinalNet) : '—'}
-                    </td>
-                    <td className="px-4 py-2.5 text-right font-mono text-slate-800 font-medium">
-                      {c.newFinalNet !== undefined && c.newFinalNet !== null ? fmt(c.newFinalNet) : '—'}
-                    </td>
-                    <td className={`px-4 py-2.5 text-right font-mono font-semibold ${diff > 0 ? 'text-emerald-600' : diff < 0 ? 'text-red-600' : 'text-slate-400'}`}>
-                      {c.action === 'CHANGED' ? (diff >= 0 ? '+' : '') + fmt(diff) : '—'}
+                  <tr key={i} className={`${rowBg} hover:brightness-110`}>
+                    <td className="px-4 py-2.5"><span className={`px-2 py-0.5 rounded-full font-bold text-xs ${badge}`}>{action}</span></td>
+                    <td className="px-4 py-2.5 font-mono text-slate-300">{d.accountNumber || '—'}</td>
+                    <td className="px-4 py-2.5 text-slate-300">{d.accountName || d.fieldChanged || '—'}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-slate-400">{d.oldFinalNet != null ? fmtN(d.oldFinalNet) : '—'}</td>
+                    <td className="px-4 py-2.5 text-right font-mono text-slate-200">{d.newFinalNet != null ? fmtN(d.newFinalNet) : '—'}</td>
+                    <td className={`px-4 py-2.5 text-right font-mono font-semibold ${diff > 0 ? 'text-emerald-400' : diff < 0 ? 'text-red-400' : 'text-slate-500'}`}>
+                      {action === 'CHANGED' ? (diff >= 0 ? '+' : '') + fmtN(diff) : '—'}
                     </td>
                   </tr>
                 );
@@ -267,10 +164,82 @@ function DiffViewer({ diff, onClose, currency }) {
         )}
       </div>
 
-      <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center">
-        <p className="text-xs text-slate-500">Showing {filtered.length} of {changes.length} changes</p>
-        <button onClick={onClose} className="px-3 py-1.5 bg-slate-700 text-white text-xs rounded-lg hover:bg-slate-800">Close</button>
+      <div className="px-5 py-3 bg-slate-800 border-t border-slate-700 flex justify-between items-center">
+        <p className="text-xs text-slate-500">Showing {filtered.length} of {diffs.length} changes</p>
+        <button onClick={onClose} className="px-4 py-1.5 bg-slate-600 text-white text-xs rounded-lg hover:bg-slate-500">Close</button>
       </div>
+    </div>
+  );
+}
+
+// ── Version Card ──────────────────────────────────────────────────────────────
+function VersionCard({ version, isLatest, currency, onViewDiff, diffLoading, activeDiff }) {
+  const isPY = version.isPriorYear;
+  const isActive = activeDiff?.id === version.id;
+
+  return (
+    <div className={`bg-white border-2 rounded-2xl p-4 transition-all ${
+      isActive ? 'border-indigo-500 shadow-lg shadow-indigo-100' :
+      isPY ? 'border-amber-200' : isLatest ? 'border-indigo-200' : 'border-slate-200'
+    }`}>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          {/* Badge */}
+          <div className={`w-11 h-11 rounded-xl flex items-center justify-center font-bold text-sm flex-shrink-0 ${
+            isPY ? 'bg-amber-100 text-amber-700' : isLatest ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-600'
+          }`}>
+            {isPY ? 'PY' : `V${version.versionNumber}`}
+          </div>
+          <div>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-semibold text-slate-800 text-sm">{version.label || (isPY ? 'Prior Year TB' : `Version ${version.versionNumber}`)}</span>
+              {isLatest && !isPY && <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-indigo-100 text-indigo-700">Active</span>}
+              {isPY && <span className="px-2 py-0.5 rounded-full text-xs font-bold bg-amber-100 text-amber-700">Prior Year</span>}
+            </div>
+            <div className="flex items-center gap-3 mt-0.5">
+              <span className="text-xs text-slate-500">{(version._count?.rows || version.rowCount || 0).toLocaleString()} rows</span>
+              <span className="text-xs text-slate-400">{fmtDate(version.uploadedAt || version.createdAt)}</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Actions */}
+        <div className="flex items-center gap-2 flex-shrink-0">
+          {!isPY && (
+            <button onClick={() => onViewDiff(version)}
+              disabled={diffLoading === version.id}
+              className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-all ${
+                isActive
+                  ? 'bg-indigo-600 text-white border-indigo-600'
+                  : 'border-slate-300 text-slate-600 hover:border-indigo-400 hover:text-indigo-600'
+              }`}>
+              {diffLoading === version.id ? '⏳' : isActive ? '▲ Hide' : '🔍 View Changes'}
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* Summary of changes if available */}
+      {!isPY && version.diffs?.length > 0 && (
+        <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-3 flex-wrap">
+          {['ADDED','DELETED','CHANGED'].map(action => {
+            const count = version.diffs.filter(d => (d.action||'').toUpperCase() === action).length;
+            if (!count) return null;
+            const colors = { ADDED:'text-emerald-600 bg-emerald-50', DELETED:'text-red-600 bg-red-50', CHANGED:'text-amber-600 bg-amber-50' };
+            return (
+              <span key={action} className={`px-2 py-0.5 rounded text-xs font-semibold ${colors[action]}`}>
+                {count} {action.toLowerCase()}
+              </span>
+            );
+          })}
+          <span className="text-xs text-slate-400 ml-auto">{version.diffs.length} total changes from previous</span>
+        </div>
+      )}
+      {!isPY && version.versionNumber === 1 && !version.diffs?.length && (
+        <div className="mt-3 pt-3 border-t border-slate-100">
+          <span className="text-xs text-slate-400 italic">First upload — no comparison available</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -282,16 +251,23 @@ export default function TBUpload() {
 
   const method   = currentEngagement?.method || 'AS';
   const region   = currentClient?.region || (currentClient?.country === 'UAE' ? 'UAE' : firm?.region || 'India');
-  const currency = region === 'UAE' || method === 'IFRS' || method === 'IFRS_SME' ? 'AED' : 'INR';
+  const currency = (method === 'IFRS' || method === 'IFRS_SME') ? 'AED' : region === 'UAE' ? 'AED' : 'INR';
 
   const [versions,     setVersions]     = useState([]);
   const [uploading,    setUploading]     = useState(false);
   const [uploadingPY,  setUploadingPY]  = useState(false);
   const [activeTab,    setActiveTab]    = useState('current');
-  const [diff,         setDiff]         = useState(null);
+  const [activeDiff,   setActiveDiff]   = useState(null);
   const [diffLoading,  setDiffLoading]  = useState(null);
+  const [pyLabel,      setPyLabel]      = useState('');
+  const [prevYearInfo, setPrevYearInfo] = useState(null);
+  const [loadingPrev,  setLoadingPrev]  = useState(false);
+  const [copying,      setCopying]      = useState(false);
 
-  useEffect(() => { loadVersions(); }, [engagementId]);
+  useEffect(() => {
+    loadVersions();
+    loadPrevYearInfo();
+  }, [engagementId]);
 
   async function loadVersions() {
     try {
@@ -300,9 +276,18 @@ export default function TBUpload() {
     } catch { setVersions([]); }
   }
 
+  async function loadPrevYearInfo() {
+    setLoadingPrev(true);
+    try {
+      const data = await tbAPI.previousYear(engagementId);
+      setPrevYearInfo(data);
+    } catch { setPrevYearInfo(null); }
+    finally { setLoadingPrev(false); }
+  }
+
   async function handleUpload(file, isPriorYear, label) {
     if (isPriorYear) setUploadingPY(true);
-    else             setUploading(true);
+    else setUploading(true);
     try {
       const data = await tbAPI.upload(engagementId, file, isPriorYear, label);
       toast.success(isPriorYear
@@ -313,25 +298,33 @@ export default function TBUpload() {
       setActiveTab('history');
     } catch (err) {
       toast.error(err?.error || 'Upload failed — check file format');
-    } finally {
-      setUploading(false);
-      setUploadingPY(false);
-    }
+    } finally { setUploading(false); setUploadingPY(false); }
   }
 
-  async function viewDiff(versionId) {
-    setDiffLoading(versionId);
-    setDiff(null);
+  async function copyPrevYearTB() {
+    if (!prevYearInfo?.found) return;
+    setCopying(true);
     try {
-      const data = await tbAPI.diff(engagementId, versionId);
-      setDiff(data);
-    } catch { toast.error('Failed to load diff'); }
-    finally { setDiffLoading(null); }
+      await tbAPI.copyPriorYear(engagementId, prevYearInfo.prevEngagementId, prevYearInfo.label);
+      toast.success(`Prior Year TB copied — ${prevYearInfo.rowCount} rows`);
+      await loadVersions();
+      setActiveTab('history');
+    } catch (err) {
+      toast.error(err?.error || 'Failed to copy prior year TB');
+    } finally { setCopying(false); }
+  }
+
+  function viewDiff(version) {
+    if (activeDiff?.id === version.id) { setActiveDiff(null); return; }
+    setDiffLoading(version.id);
+    setActiveDiff(version);
+    setDiffLoading(null);
   }
 
   const cyVersions = versions.filter(v => !v.isPriorYear);
   const pyVersions = versions.filter(v => v.isPriorYear);
   const latestCY   = cyVersions[0];
+  const hasPY      = pyVersions.length > 0;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50/20 p-6">
@@ -339,19 +332,19 @@ export default function TBUpload() {
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-slate-900">Trial Balance Upload</h1>
         <p className="text-slate-500 text-sm mt-0.5">
-          {currentClient?.name} · {method} · {currency} · Max 5 versions stored per year
+          {currentClient?.name} · {method} · {currency} · Max 5 versions per engagement
         </p>
       </div>
 
-      {/* Stats row */}
+      {/* Stats */}
       {versions.length > 0 && (
         <div className="grid grid-cols-3 gap-3 mb-6">
           {[
-            { label: 'Current Year Versions', value: cyVersions.length, icon: '📊', color: 'text-indigo-600' },
-            { label: 'Prior Year Uploaded',   value: pyVersions.length > 0 ? 'Yes' : 'No', icon: '📋', color: pyVersions.length ? 'text-emerald-600' : 'text-slate-400' },
-            { label: 'Total TB Rows',          value: (latestCY?.rowCount || 0).toLocaleString(), icon: '🔢', color: 'text-slate-700' },
-          ].map(s => (
-            <div key={s.label} className="bg-white border border-slate-200 rounded-2xl p-4">
+            { label:'Current Year Versions', value:cyVersions.length, icon:'📊', color:'text-indigo-600' },
+            { label:'Prior Year Uploaded',   value:hasPY ? 'Yes ✓' : 'No', icon:'📋', color:hasPY?'text-emerald-600':'text-slate-400' },
+            { label:'Total TB Rows (Latest)',  value:(latestCY?.rowCount||0).toLocaleString('en-IN'), icon:'🔢', color:'text-slate-700' },
+          ].map((s,i) => (
+            <div key={i} className="bg-white border border-slate-200 rounded-2xl p-4">
               <div className="flex items-center gap-3">
                 <span className="text-2xl">{s.icon}</span>
                 <div>
@@ -367,10 +360,10 @@ export default function TBUpload() {
       {/* Tabs */}
       <div className="flex gap-0 mb-5 border-b border-slate-200">
         {[
-          { key: 'current',  label: '📊 Current Year TB', count: cyVersions.length },
-          { key: 'prior',    label: '📋 Prior Year TB',   count: pyVersions.length },
-          { key: 'history',  label: '🕐 Version History', count: versions.length },
-          { key: 'format',   label: '📄 File Format Guide' },
+          { key:'current', label:'📊 Current Year TB', count:cyVersions.length },
+          { key:'prior',   label:'📋 Prior Year TB',   count:pyVersions.length },
+          { key:'history', label:'🕐 Version History', count:versions.length },
+          { key:'format',  label:'📄 File Format' },
         ].map(t => (
           <button key={t.key} onClick={() => setActiveTab(t.key)}
             className={`flex items-center gap-2 px-5 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition-colors -mb-px ${
@@ -378,7 +371,7 @@ export default function TBUpload() {
             }`}>
             {t.label}
             {t.count > 0 && (
-              <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${activeTab === t.key ? 'bg-indigo-100 text-indigo-700' : 'bg-slate-100 text-slate-500'}`}>
+              <span className={`px-1.5 py-0.5 rounded-full text-xs font-bold ${activeTab===t.key?'bg-indigo-100 text-indigo-700':'bg-slate-100 text-slate-500'}`}>
                 {t.count}
               </span>
             )}
@@ -386,16 +379,15 @@ export default function TBUpload() {
         ))}
       </div>
 
-      {/* Current Year Tab */}
+      {/* ── CURRENT YEAR ── */}
       {activeTab === 'current' && (
         <div className="space-y-5 max-w-2xl">
           <div className="bg-white border border-slate-200 rounded-2xl p-6">
             <h2 className="font-bold text-slate-800 mb-1">Upload Current Year TB</h2>
             <p className="text-slate-500 text-sm mb-5">
               Upload the Trial Balance for {currentEngagement?.financialYear || 'current financial year'}.
-              This is used to generate the Financial Statements.
             </p>
-            <DropZone onUpload={handleUpload} uploading={uploading} isPriorYear={false} />
+            <DropZone onUpload={handleUpload} uploading={uploading} isPriorYear={false} label="" setLabel={() => {}} />
           </div>
           {latestCY && (
             <div className="bg-indigo-50 border border-indigo-200 rounded-2xl p-4 flex items-center gap-3">
@@ -403,8 +395,8 @@ export default function TBUpload() {
               <div>
                 <p className="font-semibold text-indigo-900 text-sm">Current TB Active</p>
                 <p className="text-indigo-700 text-xs">
-                  Version {latestCY.versionNumber} · {latestCY.rowCount?.toLocaleString()} rows ·
-                  Uploaded {new Date(latestCY.uploadedAt || latestCY.createdAt).toLocaleDateString()}
+                  {latestCY.label} · {(latestCY.rowCount||0).toLocaleString('en-IN')} rows ·
+                  Uploaded {fmtDate(latestCY.uploadedAt || latestCY.createdAt)}
                 </p>
               </div>
             </div>
@@ -412,29 +404,67 @@ export default function TBUpload() {
         </div>
       )}
 
-      {/* Prior Year Tab */}
+      {/* ── PRIOR YEAR ── */}
       {activeTab === 'prior' && (
         <div className="space-y-5 max-w-2xl">
+          {/* Auto-detect banner */}
+          {!loadingPrev && prevYearInfo && (
+            <div className={`rounded-2xl border p-5 ${prevYearInfo.found ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+              <div className="flex items-start justify-between gap-4">
+                <div>
+                  <p className={`font-bold text-sm mb-1 ${prevYearInfo.found ? 'text-emerald-800' : 'text-slate-600'}`}>
+                    {prevYearInfo.found ? '✅ Previous Year TB Found Automatically' : '🔍 Auto-Detection Result'}
+                  </p>
+                  {prevYearInfo.found ? (
+                    <>
+                      <p className="text-emerald-700 text-xs">
+                        Engagement: <strong>{prevYearInfo.prevEngagementName}</strong> · FY {prevYearInfo.prevFY}
+                      </p>
+                      <p className="text-emerald-700 text-xs mt-0.5">
+                        {(prevYearInfo.rowCount||0).toLocaleString('en-IN')} rows · Uploaded {fmtDate(prevYearInfo.uploadedAt)}
+                      </p>
+                      <p className="text-emerald-600 text-xs mt-1 italic">
+                        The TB from the previous engagement for this client was found. Click "Use as Prior Year" to copy it.
+                      </p>
+                    </>
+                  ) : (
+                    <p className="text-slate-500 text-xs">{prevYearInfo.message || 'No prior year engagement found for this client.'}</p>
+                  )}
+                </div>
+                {prevYearInfo.found && !hasPY && (
+                  <button onClick={copyPrevYearTB} disabled={copying}
+                    className="px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 whitespace-nowrap flex-shrink-0">
+                    {copying ? '⏳ Copying...' : '✅ Use as Prior Year'}
+                  </button>
+                )}
+                {hasPY && <span className="px-3 py-1.5 bg-emerald-100 text-emerald-700 text-xs font-bold rounded-lg flex-shrink-0">Already set ✓</span>}
+              </div>
+            </div>
+          )}
+          {loadingPrev && (
+            <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 text-center text-slate-400 text-sm">
+              🔍 Checking for previous year engagement...
+            </div>
+          )}
+
           <div className="bg-white border border-amber-200 rounded-2xl p-6">
-            <h2 className="font-bold text-slate-800 mb-1">Upload Prior Year TB</h2>
+            <h2 className="font-bold text-slate-800 mb-1">Manual Upload — Prior Year TB</h2>
             <p className="text-slate-500 text-sm mb-3">
-              Prior year TB is used for <strong>comparative figures</strong> in Financial Statements,
-              Cash Flow Statement (working capital changes), and SOCE opening balances.
+              Upload a separate TB file if you want to override the auto-detected prior year.
             </p>
             <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 mb-5 text-xs text-amber-800">
-              <strong>What this enables:</strong> Comparative columns in BS/PL · Accurate CFS indirect method ·
-              Opening retained earnings in SOCE · Year-on-year variance analysis
+              <strong>Used for:</strong> Comparative columns in BS/P&L · Cash Flow Statement working capital changes · SOCE opening balances
             </div>
-            <DropZone onUpload={handleUpload} uploading={uploadingPY} isPriorYear={true} />
+            <DropZone onUpload={handleUpload} uploading={uploadingPY} isPriorYear={true} label={pyLabel} setLabel={setPyLabel} />
           </div>
-          {pyVersions.length > 0 && (
+
+          {hasPY && (
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3">
               <span className="text-2xl">✅</span>
               <div>
-                <p className="font-semibold text-amber-900 text-sm">Prior Year TB Uploaded</p>
+                <p className="font-semibold text-amber-900 text-sm">Prior Year TB Set</p>
                 <p className="text-amber-700 text-xs">
-                  {pyVersions[0].label || 'Prior Year'} · {pyVersions[0].rowCount?.toLocaleString()} rows ·
-                  Uploaded {new Date(pyVersions[0].uploadedAt || pyVersions[0].createdAt).toLocaleDateString()}
+                  {pyVersions[0].label} · {(pyVersions[0].rowCount||0).toLocaleString('en-IN')} rows
                 </p>
               </div>
             </div>
@@ -442,7 +472,7 @@ export default function TBUpload() {
         </div>
       )}
 
-      {/* History Tab */}
+      {/* ── VERSION HISTORY ── */}
       {activeTab === 'history' && (
         <div className="space-y-4 max-w-2xl">
           {versions.length === 0 ? (
@@ -455,28 +485,37 @@ export default function TBUpload() {
               {cyVersions.length > 0 && (
                 <div>
                   <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Current Year Versions</h3>
-                  <div className="space-y-2">
+                  <div className="space-y-3">
                     {cyVersions.map((v, i) => (
-                      <VersionCard key={v.id} version={v} isLatest={i === 0} onViewDiff={viewDiff} diffLoading={diffLoading} />
-                    ))}
-                  </div>
-                </div>
-              )}
-              {pyVersions.length > 0 && (
-                <div className="mt-5">
-                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Prior Year Versions</h3>
-                  <div className="space-y-2">
-                    {pyVersions.map((v) => (
-                      <VersionCard key={v.id} version={v} isLatest={false} onViewDiff={viewDiff} diffLoading={diffLoading} />
+                      <div key={v.id}>
+                        <VersionCard
+                          version={v}
+                          isLatest={i === 0}
+                          currency={currency}
+                          onViewDiff={viewDiff}
+                          diffLoading={diffLoading}
+                          activeDiff={activeDiff}
+                        />
+                        {/* Inline diff viewer */}
+                        {activeDiff?.id === v.id && (
+                          <div className="mt-2">
+                            <DiffViewer version={v} currency={currency} onClose={() => setActiveDiff(null)} />
+                          </div>
+                        )}
+                      </div>
                     ))}
                   </div>
                 </div>
               )}
 
-              {/* Diff viewer */}
-              {diff && (
+              {pyVersions.length > 0 && (
                 <div className="mt-5">
-                  <DiffViewer diff={diff} onClose={() => setDiff(null)} currency={currency} />
+                  <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Prior Year</h3>
+                  <div className="space-y-2">
+                    {pyVersions.map(v => (
+                      <VersionCard key={v.id} version={v} isLatest={false} currency={currency} onViewDiff={viewDiff} diffLoading={diffLoading} activeDiff={activeDiff} />
+                    ))}
+                  </div>
                 </div>
               )}
             </>
@@ -484,46 +523,44 @@ export default function TBUpload() {
         </div>
       )}
 
-      {/* Format Guide Tab */}
+      {/* ── FORMAT GUIDE ── */}
       {activeTab === 'format' && (
         <div className="max-w-2xl space-y-4">
-          <FormatGuide currency={currency} />
+          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5">
+            <p className="font-semibold text-blue-900 text-sm mb-2">📋 Required Column Headers</p>
+            <div className="overflow-x-auto">
+              <table className="text-xs border-collapse w-full">
+                <thead>
+                  <tr className="bg-blue-100">
+                    {['Account No','Account Name','Sub-Grouping','Debit','Credit','Net','AJE','Final Net'].map(h => (
+                      <th key={h} className="border border-blue-200 px-2 py-1.5 text-blue-800 font-semibold whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="bg-white">
+                    {['1001','Cash in Bank','Cash in Bank',`0`,`0`,`0`,`0`,`25,677`].map((v,i) => (
+                      <td key={i} className="border border-blue-200 px-2 py-1.5 text-blue-700">{v}</td>
+                    ))}
+                  </tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
           <div className="bg-white border border-slate-200 rounded-2xl p-5">
-            <h3 className="font-bold text-slate-800 mb-3">Column Mapping Details</h3>
+            <p className="font-bold text-slate-800 mb-3 text-sm">Sign Convention</p>
             <div className="space-y-2 text-sm">
               {[
-                { col: 'Account No. / Account Number', req: true,  desc: 'Unique identifier for each ledger account' },
-                { col: 'Account Name',                  req: true,  desc: 'Name of the ledger account' },
-                { col: 'Grouping',                      req: false, desc: 'Optional high-level group (Assets, Liabilities etc.)' },
-                { col: 'Sub-Grouping',                  req: true,  desc: 'Main grouping used for FS mapping (e.g. "Cash in Bank")' },
-                { col: 'Debit',                         req: false, desc: 'Total debit balance for the account' },
-                { col: 'Credit',                        req: false, desc: 'Total credit balance for the account' },
-                { col: 'Net',                           req: false, desc: 'Net balance (Debit − Credit)' },
-                { col: 'AJE / Audit Adjustment',        req: false, desc: 'Audit adjusting entries' },
-                { col: 'Final Net / Final-Net',         req: true,  desc: 'Final audited balance = Net + AJE. Used for all FS calculations.' },
-              ].map(r => (
-                <div key={r.col} className="flex items-start gap-3 py-2 border-b border-slate-100">
-                  <div className="w-52 flex-shrink-0">
-                    <span className="font-mono text-xs bg-slate-100 px-2 py-0.5 rounded text-slate-700">{r.col}</span>
-                    {r.req && <span className="ml-1 text-red-500 text-xs">*</span>}
-                  </div>
-                  <p className="text-slate-600 text-xs">{r.desc}</p>
+                { type:'Assets / Expenses',               sign:'Positive (+)', eg:'+18,44,555', color:'text-slate-700' },
+                { type:'Liabilities / Equity / Income',   sign:'Negative (−)', eg:'−27,942',    color:'text-slate-700' },
+              ].map((r,i) => (
+                <div key={i} className="flex items-center justify-between py-2 border-b border-slate-100">
+                  <span className="text-slate-600">{r.type}</span>
+                  <span className="font-semibold text-slate-800">{r.sign} <span className="font-mono text-xs text-slate-500">e.g. {r.eg}</span></span>
                 </div>
               ))}
             </div>
-            <p className="text-xs text-slate-400 mt-3">* Required columns</p>
-          </div>
-
-          <div className="bg-white border border-slate-200 rounded-2xl p-5">
-            <h3 className="font-bold text-slate-800 mb-3">Tips for {currency} Amounts</h3>
-            <div className="space-y-2 text-sm text-slate-600">
-              <p>✅ Numbers can be formatted: 1,00,000 or 100000 — both work</p>
-              <p>✅ Negative numbers: -50000 or (50000) — both accepted</p>
-              <p>✅ Decimals: up to 2 decimal places ({currency === 'AED' ? 'Fils' : 'Paise'})</p>
-              <p>✅ Blank cells in Final Net column are treated as zero</p>
-              <p>❌ Do not include currency symbols ({currency}) in cells</p>
-              <p>❌ Do not merge cells in the header row</p>
-            </div>
+            <p className="text-xs text-slate-400 mt-3">The TB must balance — sum of all Final Net values must equal zero.</p>
           </div>
         </div>
       )}

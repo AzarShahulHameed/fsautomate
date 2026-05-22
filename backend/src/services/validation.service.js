@@ -97,24 +97,25 @@ async function runAllChecks(engagementId, tbVersionId) {
 
   for (const line of fsLines) {
     if (!line.noteGroupId) continue;
-    const fsAmt   = Math.abs(Number(line.totalFinalNet));
-    const noteAmt = Math.abs(noteDetailsByNG[line.noteGroupId] || 0);
+    // Use SIGNED comparison — handles contra-assets (provision for bad debts = negative asset)
+    // FS line totalFinalNet is the signed sum; NoteDetail sum should match
+    const fsAmt   = Number(line.totalFinalNet);
+    const noteAmt = noteDetailsByNG[line.noteGroupId] || 0;
     const diff    = Math.abs(fsAmt - noteAmt);
     if (diff < 1) {
       castingPass++;
     } else {
       castingFail++;
-      // Find TB sub-groupings for this FS head
       const relatedMappings = mappings.filter(m => m.groupName === line.groupName);
       castingErrors.push({
-        groupName:     line.groupName,
+        groupName:      line.groupName,
         assetLiability: line.assetLiability,
-        sheet:         line.sheet,
+        sheet:          line.sheet,
         fsAmt,
         noteAmt,
         diff,
-        subGroupings:  relatedMappings.map(m => m.subGrouping),
-        fix: `FS line shows ${fsAmt.toFixed(2)} but note details sum to ${noteAmt.toFixed(2)}. Re-generate FS after ensuring all sub-groupings are mapped.`,
+        subGroupings:   relatedMappings.map(m => m.subGrouping),
+        fix: `FS line total is ${fsAmt.toFixed(2)} but note details sum to ${noteAmt.toFixed(2)} (diff: ${diff.toFixed(2)}). Re-generate FS and Notes after fixing mappings.`,
       });
     }
   }
@@ -213,13 +214,93 @@ async function runAllChecks(engagementId, tbVersionId) {
     });
   }
 
+  // ── 10. METHOD-SPECIFIC CHECKS ──────────────────────────────────────────
+  // Load engagement method
+  const engRows = await prisma.$queryRawUnsafe(
+    `SELECT e.method FROM "Engagement" e WHERE e.id = $1 LIMIT 1`, engagementId
+  );
+  const method = engRows[0]?.method || 'AS';
+
+  // OCI check — required for IND_AS and IFRS, not for AS/IFRS_SME
+  if (['IND_AS','IFRS'].includes(method)) {
+    const hasOCI = ociLines.length > 0;
+    checks.push({
+      engagementId, tbVersionId: tbVersion?.id,
+      checkType: 'OCI_CHECK',
+      status: hasOCI ? 'PASS' : 'INFO',
+      message: hasOCI
+        ? `✓ ${ociLines.length} OCI item${ociLines.length>1?'s':''} found — ${method} requires OCI disclosure`
+        : `ℹ No OCI items mapped. If there are actuarial gains/losses, FVOCI items, or translation differences, map them to OCI sheet in Mapping page.`,
+      detail: { method, ociItems: ociLines.map(l => ({ name: l.groupName, amount: Number(l.totalFinalNet) })) },
+    });
+  }
+
+  if (['AS','IFRS_SME'].includes(method)) {
+    if (ociLines.length > 0) {
+      checks.push({
+        engagementId, tbVersionId: tbVersion?.id,
+        checkType: 'OCI_CHECK',
+        status: 'WARNING',
+        message: `⚠ ${ociLines.length} OCI item${ociLines.length>1?'s':''} found but ${method} generally does not require OCI. Verify these items.`,
+        detail: { method, ociItems: ociLines.map(l => ({ name: l.groupName, amount: Number(l.totalFinalNet) })) },
+      });
+    }
+  }
+
+  // Schedule III check — for AS and IND_AS
+  if (['AS','IND_AS'].includes(method)) {
+    const hasNCA = bsLines.some(l => l.assetLiability === 'Assets' &&
+      ['fixed asset','property','intangible','deferred','long term','investment'].some(k => l.groupName?.toLowerCase().includes(k)));
+    const hasCA  = bsLines.some(l => l.assetLiability === 'Assets' &&
+      ['cash','bank','inventor','debtor','receivable','current'].some(k => l.groupName?.toLowerCase().includes(k)));
+    checks.push({
+      engagementId, tbVersionId: tbVersion?.id,
+      checkType: 'SCHEDULE_III',
+      status: (hasNCA && hasCA) ? 'PASS' : 'WARNING',
+      message: (hasNCA && hasCA)
+        ? `✓ Schedule III structure found — Non-current and Current assets both present`
+        : `⚠ Schedule III requires separate Non-current and Current classification. Check that assets are mapped with appropriate FS heads.`,
+      detail: { method, hasNonCurrentAssets: hasNCA, hasCurrentAssets: hasCA },
+    });
+  }
+
+  // IFRS IAS 1 check — non-current/current split
+  if (['IFRS','IFRS_SME'].includes(method)) {
+    const hasNCA = bsLines.some(l => l.assetLiability === 'Assets' &&
+      ['property','plant','ppe','intangible','goodwill','right-of-use','deferred'].some(k => l.groupName?.toLowerCase().includes(k)));
+    const hasCA  = bsLines.some(l => l.assetLiability === 'Assets' &&
+      ['cash','inventor','trade and other receiv','prepay','current'].some(k => l.groupName?.toLowerCase().includes(k)));
+    const hasNCL = bsLines.some(l => l.assetLiability === 'Liabilities' &&
+      ['long term','deferred tax liab','lease liab','non-current'].some(k => l.groupName?.toLowerCase().includes(k)));
+    checks.push({
+      engagementId, tbVersionId: tbVersion?.id,
+      checkType: 'IAS1_STRUCTURE',
+      status: (hasNCA && hasCA) ? 'PASS' : 'WARNING',
+      message: (hasNCA && hasCA)
+        ? `✓ IAS 1 structure — Non-current and Current assets classified correctly`
+        : `⚠ IAS 1 requires Non-current / Current split. Ensure PPE, Intangibles → Non-current; Cash, Receivables → Current.`,
+      detail: { method, hasNCA, hasCA, hasNCL },
+    });
+  }
+
+  // Revenue recognition check — all methods
+  if (totalIncome === 0 && plLines.length > 0) {
+    checks.push({
+      engagementId, tbVersionId: tbVersion?.id,
+      checkType: 'REVENUE_CHECK',
+      status: 'WARNING',
+      message: `⚠ No revenue/income found in P&L. Verify that income items are mapped with 'Income' classification.`,
+      detail: { plLineCount: plLines.length, totalIncome },
+    });
+  }
+
   // Save results via raw SQL to bypass enum type mismatch in DB
   await prisma.validationLog.deleteMany({ where: { engagementId } });
   for (const check of checks) {
     try {
       await prisma.$executeRawUnsafe(
         `INSERT INTO "ValidationLog" (id, "engagementId", "tbVersionId", "checkType", status, message, detail, "createdAt")
-         VALUES (gen_random_uuid(), $1, $2, $3, $4, $5, $6::jsonb, NOW())`,
+         VALUES (gen_random_uuid(), $1, $2, $3, $4::"ValidationStatus", $5, $6::jsonb, NOW())`,
         check.engagementId,
         check.tbVersionId || null,
         check.checkType,

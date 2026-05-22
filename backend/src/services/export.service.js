@@ -331,19 +331,30 @@ function buildNotes(noteGroups, divisor) {
 
 // ── MAIN EXPORT FUNCTION ──────────────────────────────────────────────────────
 async function exportWord(engagementId, firmId) {
-  // Fetch all data
-  const [engagement, sections, fsLines, noteGroups] = await Promise.all([
-    prisma.engagement.findFirst({
-      where: { id: engagementId, client: { firmId } },
-      include: { client: true },
-    }),
+  // Raw SQL - avoids broken Prisma relation after db pull
+  const engRows = await prisma.$queryRawUnsafe(
+    `SELECT e.*, c.name as "clientName", c.cin, c.pan, c.gstin,
+            c."tradeLicense", c."vatNumber", c.region as "clientRegion"
+     FROM "Engagement" e JOIN "Client" c ON c.id = e."clientId"
+     WHERE e.id = $1 AND c."firmId" = $2 LIMIT 1`,
+    engagementId, firmId
+  );
+  if (!engRows.length) throw Object.assign(new Error('Engagement not found'), { status: 404 });
+  const engRow = engRows[0];
+  const engagement = {
+    ...engRow,
+    client: { name: engRow.clientName, cin: engRow.cin, pan: engRow.pan,
+              gstin: engRow.gstin, tradeLicense: engRow.tradeLicense,
+              vatNumber: engRow.vatNumber, region: engRow.clientRegion },
+  };
+
+  const [sections, _rawWordFsLines, noteGroups] = await Promise.all([
     prisma.reportSection.findMany({
       where: { engagementId },
       orderBy: { displayOrder: 'asc' },
     }),
     prisma.fSLine.findMany({
       where: { engagementId },
-      include: { noteGroup: true },
       orderBy: { displayOrder: 'asc' },
     }),
     prisma.noteGroup.findMany({
@@ -355,12 +366,17 @@ async function exportWord(engagementId, firmId) {
     }),
   ]);
 
-  if (!engagement) throw Object.assign(new Error('Engagement not found'), { status: 404 });
+  // Join FSLines with NoteGroups (no Prisma relation after db pull)
+  const _ngByGroupId = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
+  const fsLines = _rawWordFsLines.map(l => ({
+    ...l,
+    noteGroup: l.noteGroupId ? _ngByGroupId.get(l.noteGroupId) || null : null,
+  }));
 
-  const D = 1; // Actual amounts in Word export (user can choose in future)
+  const D = 1; // Actual amounts in Word export
 
-  const bsLines  = fsLines.filter(l => l.sheet === 'BS');
-  const plLines  = fsLines.filter(l => l.sheet === 'PL');
+  const bsLines  = fsLines.filter(l => l.sheet === 'BS' && !l.groupName?.startsWith('__'));
+  const plLines  = fsLines.filter(l => l.sheet === 'PL' && !l.groupName?.startsWith('__'));
 
   // Structure notes
   const structuredNotes = noteGroups
@@ -485,17 +501,33 @@ async function exportExcel(engagementId, firmId) {
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FinStatement SaaS';
 
-  const engagement = await prisma.engagement.findFirst({
-    where: { id: engagementId, client: { firmId } },
-    include: { client: true },
-  });
+  const engRows2 = await prisma.$queryRawUnsafe(
+    `SELECT e.*, c.name as "clientName", c.cin, c.pan, c.gstin,
+            c."tradeLicense", c."vatNumber", c.region as "clientRegion"
+     FROM "Engagement" e JOIN "Client" c ON c.id = e."clientId"
+     WHERE e.id = $1 AND c."firmId" = $2 LIMIT 1`,
+    engagementId, firmId
+  );
+  if (!engRows2.length) throw Object.assign(new Error('Engagement not found'), { status: 404 });
+  const engRow2 = engRows2[0];
+  const engagement = {
+    ...engRow2,
+    client: { name: engRow2.clientName, cin: engRow2.cin, pan: engRow2.pan,
+              gstin: engRow2.gstin, tradeLicense: engRow2.tradeLicense,
+              vatNumber: engRow2.vatNumber, region: engRow2.clientRegion },
+  };
   if (!engagement) throw Object.assign(new Error('Not found'), { status: 404 });
 
-  const fsLines = await prisma.fSLine.findMany({
+  const rawLines = await prisma.fSLine.findMany({
     where: { engagementId },
-    include: { noteGroup: true },
     orderBy: { displayOrder: 'asc' },
   });
+  const noteGroupsForJoin = await prisma.noteGroup.findMany({ where: { engagementId } });
+  const ngMapForJoin = new Map(noteGroupsForJoin.map(ng => [ng.noteGroupId, ng]));
+  const fsLines = rawLines.map(l => ({
+    ...l,
+    noteGroup: l.noteGroupId ? ngMapForJoin.get(l.noteGroupId) || null : null,
+  }));
 
   const bsLines = fsLines.filter(l => l.sheet === 'BS');
   const plLines = fsLines.filter(l => l.sheet === 'PL');
@@ -566,4 +598,24 @@ async function exportExcel(engagementId, firmId) {
   return wb.xlsx.writeBuffer();
 }
 
-module.exports = { exportWord, exportExcel };
+// ── PDF Export — generates HTML then sends to frontend for print ──────────────
+async function exportPDFData(engagementId, firmId) {
+  const engRows = await prisma.$queryRawUnsafe(
+    `SELECT e.*, c.name as "clientName", c.id as "clientId", c.cin, c.pan, c.gstin,
+            c."tradeLicense", c."vatNumber", c.region as "clientRegion"
+     FROM "Engagement" e JOIN "Client" c ON c.id = e."clientId"
+     WHERE e.id = $1 AND c."firmId" = $2 LIMIT 1`,
+    engagementId, firmId
+  );
+  if (!engRows.length) throw Object.assign(new Error('Engagement not found'), { status: 404 });
+  const engRow   = engRows[0];
+  const fsLines  = await prisma.fSLine.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } });
+  const noteGroups = await prisma.noteGroup.findMany({ where: { engagementId }, orderBy: { noteNumber: 'asc' } });
+  const noteDetails = await prisma.noteDetail.findMany({ where: { engagementId } });
+  return {
+    engagement: { ...engRow, clientName: engRow.clientName },
+    fsLines, noteGroups, noteDetails,
+  };
+}
+
+module.exports = { exportWord, exportExcel, exportPDFData };

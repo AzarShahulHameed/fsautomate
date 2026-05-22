@@ -3,10 +3,10 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useStore } from '../../store';
 import {
   LayoutDashboard, Users, Upload, Link2,
-  FileSpreadsheet, FileText, Edit3, Download, LogOut,
+  FileSpreadsheet, FileText, Edit3, Download, LogOut, Settings,
   ShieldCheck, BookOpen, Grid3X3, FileCheck
 } from 'lucide-react';
-
+ 
 function SidebarAvatar({ user }) {
   if (user?.avatar) {
     return <img src={user.avatar} alt={user.name} className="w-8 h-8 rounded-xl object-cover ring-2 ring-white/20 flex-shrink-0" />;
@@ -17,16 +17,25 @@ function SidebarAvatar({ user }) {
     </div>
   );
 }
-
+ 
 export default function Layout() {
   const { user, firm, clearAuth, currentEngagement, currentClient } = useStore();
   const navigate = useNavigate();
   const eid = currentEngagement?.id;
   // Use client region if available, else firm region
-  const region   = currentClient?.region || currentClient?.country === 'UAE' ? 'UAE' : (firm?.region || 'India');
-  const currency = region === 'UAE' ? 'AED' : 'INR';
+  // Derive method first — most authoritative source
+  const method   = currentEngagement?.method;
+  // Currency: method > client region > firm region > default
+  const currency = (method === 'IFRS' || method === 'IFRS_SME')
+    ? 'AED'
+    : (method === 'AS' || method === 'IND_AS')
+    ? 'INR'
+    : (currentClient?.region === 'UAE' || currentClient?.country === 'UAE')
+    ? 'AED'
+    : 'INR';
+  const region   = currency === 'AED' ? 'UAE' : (currentClient?.region || firm?.region || 'India');
   const flag     = region === 'UAE' ? '🇦🇪' : '🇮🇳';
-
+ 
   const navItems = [
     { to: '/',        icon: LayoutDashboard, label: 'Dashboard', exact: true },
     { to: '/clients', icon: Users,           label: 'Clients' },
@@ -40,10 +49,9 @@ export default function Layout() {
       { to: `/engagements/${eid}/validation`, icon: ShieldCheck,    label: 'Validation' },
       { divider: 'Report' },
       { to: `/engagements/${eid}/report`,     icon: Edit3,          label: 'Report Builder' },
-      { to: `/engagements/${eid}/export`,     icon: Download,       label: 'Export' },
     ] : []),
   ];
-
+ 
   return (
     <div className="flex h-screen bg-slate-100 overflow-hidden">
       {/* Sidebar */}
@@ -62,7 +70,7 @@ export default function Layout() {
             </div>
           </div>
         </div>
-
+ 
         {/* Active engagement */}
         {currentEngagement && (
           <div className="mx-3 mt-3 px-3 py-2.5 rounded-xl" style={{background:'rgba(99,102,241,0.15)',border:'1px solid rgba(99,102,241,0.25)'}}>
@@ -77,7 +85,7 @@ export default function Layout() {
             </div>
           </div>
         )}
-
+ 
         {/* Nav */}
         <nav className="flex-1 py-3 overflow-y-auto px-2 space-y-0.5">
           {navItems.map((item, i) => {
@@ -109,7 +117,20 @@ export default function Layout() {
             );
           })}
         </nav>
-
+ 
+        {/* Settings link */}
+        <div className="px-3 pb-1">
+          <NavLink to="/settings"
+            className={({ isActive }) =>
+              `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-medium transition-all ${
+                isActive ? 'bg-white/15 text-white' : 'text-slate-400 hover:text-white hover:bg-white/10'
+              }`
+            }>
+            <Settings size={15} />
+            <span>Settings</span>
+          </NavLink>
+        </div>
+ 
         {/* User footer */}
         <div className="px-3 py-3 border-t border-white/[0.07]">
           <div className="flex items-center gap-2.5 px-1">
@@ -128,7 +149,7 @@ export default function Layout() {
           </div>
         </div>
       </aside>
-
+ 
       {/* Main */}
       <main className="flex-1 overflow-auto bg-slate-50">
         <Outlet />

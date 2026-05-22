@@ -9,6 +9,7 @@ import { useStore } from './store';
 import Layout              from './components/layout/Layout';
 import Login               from './pages/Login';
 import Register            from './pages/Register';
+import Settings from './pages/Settings';
 import Dashboard           from './pages/Dashboard';
 import Clients             from './pages/Clients';
 import Engagements         from './pages/Engagements';
@@ -17,7 +18,6 @@ import Mapping             from './pages/Mapping';
 import FinancialStatements from './pages/FinancialStatements';
 import Notes               from './pages/Notes';
 import ReportEditor        from './pages/ReportEditor';
-import Export              from './pages/Export';
 import ValidationChecks    from './pages/ValidationChecks';
 import Schedules            from './pages/Schedules';
 
@@ -64,9 +64,9 @@ export default function App() {
           <Route path="engagements/:engagementId/fs"         element={<FinancialStatements />} />
           <Route path="engagements/:engagementId/notes"      element={<Notes />} />
           <Route path="engagements/:engagementId/validation" element={<ValidationChecks />} />
+          <Route path="/settings" element={<Settings />} />
           <Route path="engagements/:engagementId/schedules"   element={<Schedules />} />
           <Route path="engagements/:engagementId/report"     element={<ReportEditor />} />
-          <Route path="engagements/:engagementId/export"     element={<Export />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

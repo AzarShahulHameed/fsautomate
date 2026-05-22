@@ -160,29 +160,124 @@ async function uploadTB(engagementId, firmId, fileBuffer, uploadedByRef, isPrior
 }
 
 async function getLatestTBRows(engagementId, firmId) {
-  const engagement = await prisma.engagement.findFirst({
-    where: { id: engagementId, client: { firmId } },
-  });
-  if (!engagement) throw Object.assign(new Error('Not found'), { status: 404 });
+  const rows = await prisma.$queryRawUnsafe(
+    `SELECT e.id FROM "Engagement" e JOIN "Client" c ON c.id = e."clientId"
+     WHERE e.id = $1 AND c."firmId" = $2 LIMIT 1`, engagementId, firmId
+  );
+  if (!rows.length) throw Object.assign(new Error('Not found'), { status: 404 });
 
   return prisma.tBVersion.findFirst({
-    where: { engagementId },
+    where: { engagementId, isPriorYear: false },
     orderBy: { versionNumber: 'desc' },
     include: { rows: true },
   });
 }
 
 async function getVersionHistory(engagementId, firmId) {
-  const engagement = await prisma.engagement.findFirst({
-    where: { id: engagementId, client: { firmId } },
-  });
-  if (!engagement) throw Object.assign(new Error('Not found'), { status: 404 });
+  const engRows = await prisma.$queryRawUnsafe(
+    `SELECT e.id, e.method, e."financialYear", e."clientId",
+            c.name as "clientName", c."firmId"
+     FROM "Engagement" e JOIN "Client" c ON c.id = e."clientId"
+     WHERE e.id = $1 AND c."firmId" = $2 LIMIT 1`, engagementId, firmId
+  );
+  if (!engRows.length) throw Object.assign(new Error('Not found'), { status: 404 });
+  const eng = engRows[0];
 
-  return prisma.tBVersion.findMany({
+  // Load versions
+  const versions = await prisma.tBVersion.findMany({
     where: { engagementId },
     orderBy: { versionNumber: 'desc' },
-    include: { diffs: true, _count: { select: { rows: true } } },
+    include: { _count: { select: { rows: true } } },
   });
+
+  // Load diffs via raw SQL to avoid enum type mismatch on action column
+  const vids = versions.map(v => v.id);
+  let diffs = [];
+  if (vids.length > 0) {
+    const ph = vids.map((_, i) => `$${i + 1}`).join(',');
+    diffs = await prisma.$queryRawUnsafe(
+      `SELECT id, "tbVersionId", "accountNumber", "accountName",
+              action::text as action, "oldFinalNet", "newFinalNet", "fieldChanged", "createdAt"
+       FROM "TBVersionDiff" WHERE "tbVersionId" IN (${ph})
+       ORDER BY "createdAt" ASC`,
+      ...vids
+    );
+  }
+
+  const diffMap = {};
+  for (const d of diffs) {
+    if (!diffMap[d.tbVersionId]) diffMap[d.tbVersionId] = [];
+    diffMap[d.tbVersionId].push(d);
+  }
+
+  return versions.map(v => ({ ...v, diffs: diffMap[v.id] || [] }));
 }
 
-module.exports = { uploadTB, getLatestTBRows, getVersionHistory };
+// Get previous year TB for same client — called by Prior Year tab
+async function getPreviousYearTB(engagementId, firmId) {
+  // Get current engagement details
+  const engRows = await prisma.$queryRawUnsafe(
+    `SELECT e.*, c."clientId" as cid, e."clientId", e."financialYear", e.method
+     FROM "Engagement" e JOIN "Client" c ON c.id = e."clientId"
+     WHERE e.id = $1 AND c."firmId" = $2 LIMIT 1`, engagementId, firmId
+  );
+  if (!engRows.length) return null;
+  const eng = engRows[0];
+
+  // Parse current financial year to find previous year
+  // Formats: "2024-25", "2024", "FY2024-25"
+  const fy = eng.financialYear || '';
+  let prevFY = null;
+
+  // Format: "2024-25" → previous is "2023-24"
+  const match1 = fy.match(/(\d{4})-(\d{2,4})/);
+  if (match1) {
+    const startYear = parseInt(match1[1]);
+    const endShort  = parseInt(match1[2]);
+    prevFY = `${startYear - 1}-${String(endShort - 1).padStart(match1[2].length, '0')}`;
+  }
+
+  // Format: "2024" → previous is "2023"
+  const match2 = fy.match(/^(\d{4})$/);
+  if (match2) {
+    prevFY = String(parseInt(match2[1]) - 1);
+  }
+
+  if (!prevFY) return null;
+
+  // Find previous year engagement for same client
+  const prevEngRows = await prisma.$queryRawUnsafe(
+    `SELECT e.id, e.name, e."financialYear", e.method
+     FROM "Engagement" e
+     WHERE e."clientId" = $1 AND e."financialYear" = $2
+     ORDER BY e."createdAt" DESC LIMIT 1`,
+    eng.clientId, prevFY
+  );
+
+  if (!prevEngRows.length) return { found: false, prevFY, message: `No engagement found for ${prevFY}` };
+
+  const prevEng = prevEngRows[0];
+
+  // Get the latest CY TB from previous engagement
+  const prevTB = await prisma.tBVersion.findFirst({
+    where: { engagementId: prevEng.id, isPriorYear: false },
+    orderBy: { versionNumber: 'desc' },
+    include: { rows: true },
+  });
+
+  if (!prevTB) return { found: false, prevFY, engagementId: prevEng.id, message: `Engagement found for ${prevFY} but no TB uploaded yet` };
+
+  return {
+    found: true,
+    prevFY,
+    prevEngagementId: prevEng.id,
+    prevEngagementName: prevEng.name,
+    tbVersionId: prevTB.id,
+    rowCount: prevTB.rowCount,
+    uploadedAt: prevTB.uploadedAt,
+    rows: prevTB.rows,
+    label: `Prior Year — ${prevFY} (auto-loaded from ${prevEng.name})`,
+  };
+}
+
+module.exports = { uploadTB, getLatestTBRows, getVersionHistory, getPreviousYearTB };

@@ -62,20 +62,14 @@ export const useStore = create(
         return region === 'UAE' ? ['IFRS', 'IFRS_SME'] : ['AS', 'IND_AS'];
       },
 
-      // Computed currency — firm.currency takes priority, else derive from engagement method
-      getCurrency: () => {
-        const state = get();
-        if (state.firm?.currency) return state.firm.currency;
-        const method = state.currentEngagement?.method;
-        return (method === 'IFRS' || method === 'IFRS_SME') ? 'AED' : 'INR';
-      },
+      
 
       sidebarOpen: true,
       setSidebarOpen: (v) => set({ sidebarOpen: v }),
     }),
     {
       name: 'finstatement-auth',
-      storage: createJSONStorage(() => sessionStorage),
+      storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
         token: s.token, user: s.user, firm: s.firm,
         currentClient: s.currentClient, currentEngagement: s.currentEngagement,

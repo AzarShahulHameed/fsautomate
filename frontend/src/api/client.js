@@ -12,7 +12,7 @@ const api = axios.create({
 // Attach stored JWT token on every request
 api.interceptors.request.use((config) => {
   try {
-    const raw = sessionStorage.getItem('finstatement-auth');
+    const raw = localStorage.getItem('finstatement-auth');
     if (raw) {
       const { state } = JSON.parse(raw);
       if (state?.token) {
@@ -28,7 +28,7 @@ api.interceptors.response.use(
   (res) => res.data,  // Unwrap .data so callers get objects directly
   (err) => {
     if (err.response?.status === 401) {
-      sessionStorage.removeItem('finstatement-auth');
+      localStorage.removeItem('finstatement-auth');
       window.location.href = '/login';
     }
     return Promise.reject(err?.response?.data || err);
@@ -39,12 +39,15 @@ export default api;
 
 // ─── Auth API ─────────────────────────────────────────────────────────────
 export const authAPI = {
-  login:         (data) => api.post('/auth/login', data),
-  register:      (data) => api.post('/auth/register', data),
-  logout:        ()     => api.post('/auth/logout'),
-  me:            ()     => api.get('/auth/me'),
-  savePageState: (ps)   => api.patch('/auth/page-state', { pageState: ps }),
-  getPageState:  ()     => api.get('/auth/page-state'),
+  login:          (data) => api.post('/auth/login', data),
+  register:       (data) => api.post('/auth/register', data),
+  logout:         ()     => api.post('/auth/logout'),
+  me:             ()     => api.get('/auth/me'),
+  savePageState:  (ps)   => api.patch('/auth/page-state', { pageState: ps }),
+  getPageState:   ()     => api.get('/auth/page-state'),
+  updateProfile:  (data) => api.patch('/auth/profile', data),
+  changePassword: (data) => api.patch('/auth/password', data),
+  updateFirm:     (data) => api.patch('/auth/firm', data),
 };
 
 // ─── Client API ───────────────────────────────────────────────────────────
@@ -113,7 +116,7 @@ const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
 
 function authHeader() {
   try {
-    const raw = sessionStorage.getItem('finstatement-auth');
+    const raw = localStorage.getItem('finstatement-auth');
     if (raw) {
       const { state } = JSON.parse(raw);
       if (state?.token) return { Authorization: `Bearer ${state.token}` };
@@ -121,6 +124,17 @@ function authHeader() {
   } catch (_) {}
   return {};
 }
+
+// ─── Upload API ───────────────────────────────────────────────────────────────
+export const uploadAPI = {
+  avatar: (file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post('/upload/avatar', fd, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+  },
+};
 
 export const exportAPI = {
   word:  (eid) => axios.get(
