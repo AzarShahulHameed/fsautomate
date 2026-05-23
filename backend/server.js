@@ -8,6 +8,7 @@ const rateLimit = require('express-rate-limit');
 const session   = require('express-session');
 
 const { prisma }          = require('./src/config/db');
+const { sanitizeMiddleware, sizeLimitCheck, preventParamPollution } = require('./src/middleware/security');
 const { auditMiddleware } = require('./src/middleware/audit');
 const authRoutes          = require('./src/routes/auth.routes');
 const clientRoutes        = require('./src/routes/client.routes');
@@ -32,12 +33,24 @@ app.set('trust proxy', 1);
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
-      defaultSrc: ["'self'"],
-      styleSrc:   ["'self'", "'unsafe-inline'"],
-      scriptSrc:  ["'self'"],
-      imgSrc:     ["'self'", 'data:'],
+      defaultSrc:  ["'self'"],
+      styleSrc:    ["'self'", "'unsafe-inline'"],
+      scriptSrc:   ["'self'"],
+      imgSrc:      ["'self'", 'data:', 'https://res.cloudinary.com', 'https://*.vercel.app'],
+      connectSrc:  ["'self'", 'https://*.onrender.com', 'https://*.vercel.app'],
+      fontSrc:     ["'self'", 'data:'],
+      objectSrc:   ["'none'"],
+      frameAncestors: ["'none'"], // prevents clickjacking
     },
   },
+  hsts: {
+    maxAge: 31536000,
+    includeSubDomains: true,
+    preload: true,
+  },
+  noSniff: true,
+  xssFilter: true,
+  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
 
 // ─── CORS ──────────────────────────────────────────────────────────────────
@@ -84,8 +97,12 @@ app.use(session({
 }));
 
 // ─── Rate limiting ─────────────────────────────────────────────────────────
-app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many auth attempts' }));
-app.use('/api', rateLimit({ windowMs: 60 * 1000, max: 500 }));
+// Strict rate limit on auth endpoints
+app.use('/api/auth/login',    rateLimit({ windowMs: 15 * 60 * 1000, max: 10,  message: { error: 'Too many login attempts. Try again in 15 minutes.' }, standardHeaders: true }));
+app.use('/api/auth/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5,   message: { error: 'Too many registration attempts.' }, standardHeaders: true }));
+app.use('/api/auth',          rateLimit({ windowMs: 15 * 60 * 1000, max: 50,  message: { error: 'Too many requests.' }, standardHeaders: true }));
+app.use('/api/upload',        rateLimit({ windowMs: 60 * 60 * 1000, max: 20,  message: { error: 'Too many file uploads.' }, standardHeaders: true }));
+app.use('/api',               rateLimit({ windowMs: 60 * 1000,      max: 300, message: { error: 'Too many requests.' }, standardHeaders: true }));
 
 // ─── Audit logging ─────────────────────────────────────────────────────────
 app.use(auditMiddleware);
