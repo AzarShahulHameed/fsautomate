@@ -22,32 +22,41 @@ async function waitForBackend(maxWait = 90000, interval = 3000) {
   return false;
 }
  
-// Financial background slides using Unsplash
 const SLIDES = [
   {
     url: 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1600&q=80',
     caption: 'Real-time financial intelligence',
     sub: 'Track every rupee, every dirham',
+    accent: 'rgba(56,189,248,0.9)',       // sky blue
+    tint: 'rgba(14,30,60,0.55)',
   },
   {
     url: 'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=1600&q=80',
     caption: 'Compliance made simple',
     sub: 'AS · Ind AS · IFRS · IFRS SME',
+    accent: 'rgba(52,211,153,0.9)',       // emerald
+    tint: 'rgba(5,30,20,0.50)',
   },
   {
     url: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1600&q=80',
-    caption: 'From trial balance to financial statements',
+    caption: 'From trial balance to statements',
     sub: 'Automated mapping, zero errors',
+    accent: 'rgba(251,191,36,0.9)',       // amber
+    tint: 'rgba(30,20,5,0.50)',
   },
   {
     url: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=1600&q=80',
     caption: 'Multi-client. Multi-region.',
     sub: 'India & UAE under one platform',
+    accent: 'rgba(167,139,250,0.9)',      // violet
+    tint: 'rgba(20,10,40,0.52)',
   },
   {
     url: 'https://images.unsplash.com/photo-1642790106117-e829e14a795f?w=1600&q=80',
     caption: 'Audit-ready in minutes',
     sub: 'Schedule III · Notes · Disclosures',
+    accent: 'rgba(249,115,22,0.9)',       // orange
+    tint: 'rgba(30,15,5,0.50)',
   },
 ];
  
@@ -58,7 +67,7 @@ export default function Login() {
   const [wakeSecs, setWakeSecs] = useState(0);
   const [showPass, setShowPass] = useState(false);
   const [slide, setSlide]       = useState(0);
-  const [fadeIn, setFadeIn]     = useState(true);
+  const [visible, setVisible]   = useState(true);
  
   const { setAuth } = useStore();
   const navigate    = useNavigate();
@@ -66,19 +75,17 @@ export default function Login() {
   // Slideshow
   useEffect(() => {
     const t = setInterval(() => {
-      setFadeIn(false);
+      setVisible(false);
       setTimeout(() => {
         setSlide(s => (s + 1) % SLIDES.length);
-        setFadeIn(true);
-      }, 700);
-    }, 4000);
+        setVisible(true);
+      }, 600);
+    }, 4500);
     return () => clearInterval(t);
   }, []);
  
-  // Pre-warm
   useEffect(() => { pingBackend(); }, []);
  
-  // Wake counter
   useEffect(() => {
     if (!waking) { setWakeSecs(0); return; }
     const t = setInterval(() => setWakeSecs(s => s + 1), 1000);
@@ -115,62 +122,76 @@ export default function Login() {
   const current   = SLIDES[slide];
  
   return (
-    <div className="min-h-screen flex overflow-hidden" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+    <div className="min-h-screen flex overflow-hidden relative">
  
-      {/* ── Left: Slideshow ── */}
-      <div className="hidden lg:flex flex-1 relative overflow-hidden">
-        {/* Background image */}
+      {/* ── Full-screen background image ── */}
+      {SLIDES.map((s, i) => (
         <div
-          className="absolute inset-0 bg-cover bg-center transition-all"
+          key={i}
+          className="absolute inset-0 bg-cover bg-center"
           style={{
-            backgroundImage: `url(${current.url})`,
-            opacity: fadeIn ? 1 : 0,
-            transition: 'opacity 0.7s ease-in-out',
+            backgroundImage: `url(${s.url})`,
+            opacity: i === slide ? (visible ? 1 : 0) : 0,
+            transition: 'opacity 0.8s ease-in-out',
+            zIndex: 0,
           }}
         />
+      ))}
  
-        {/* Dark overlay */}
-        <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(5,10,30,0.75) 0%, rgba(10,15,50,0.55) 100%)' }} />
+      {/* Gradient overlay — left lighter, right darker to contrast panel */}
+      <div className="absolute inset-0 z-10"
+        style={{
+          background: `linear-gradient(105deg, ${current.tint} 0%, rgba(0,0,0,0.15) 50%, rgba(0,0,0,0.60) 100%)`,
+          transition: 'background 0.8s ease-in-out',
+        }}
+      />
  
-        {/* Brand top-left */}
-        <div className="absolute top-8 left-8 flex items-center gap-3 z-10">
-          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.2)' }}>
+      {/* ── Left: Brand + Caption ── */}
+      <div className="hidden lg:flex flex-1 flex-col justify-between p-10 relative z-20">
+        {/* Logo */}
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center"
+            style={{ background: 'rgba(255,255,255,0.18)', backdropFilter: 'blur(12px)', border: '1px solid rgba(255,255,255,0.25)' }}>
             <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-              <path d="M3 3h18v4H3V3zm0 7h12v4H3v-4zm0 7h18v4H3v-4z" fill="white" fillOpacity="0.9"/>
+              <path d="M3 3h18v4H3V3zm0 7h12v4H3v-4zm0 7h18v4H3v-4z" fill="white"/>
             </svg>
           </div>
           <div>
-            <div className="text-white font-bold text-lg leading-none">FinStatement</div>
-            <div className="text-blue-200 text-xs opacity-80">Financial Platform</div>
+            <div className="text-white font-bold text-lg leading-none" style={{ textShadow: '0 1px 8px rgba(0,0,0,0.4)' }}>FinStatement</div>
+            <div className="text-white/60 text-xs">Financial Platform</div>
           </div>
         </div>
  
-        {/* Bottom caption */}
-        <div className="absolute bottom-12 left-8 right-8 z-10">
+        {/* Caption */}
+        <div>
           <div
             style={{
-              opacity: fadeIn ? 1 : 0,
-              transform: fadeIn ? 'translateY(0)' : 'translateY(8px)',
+              opacity: visible ? 1 : 0,
+              transform: visible ? 'translateY(0)' : 'translateY(10px)',
               transition: 'all 0.7s ease-in-out',
             }}
           >
-            <p className="text-white text-3xl font-bold leading-tight mb-2" style={{ textShadow: '0 2px 20px rgba(0,0,0,0.5)' }}>
+            {/* Accent line */}
+            <div className="w-10 h-1 rounded-full mb-5"
+              style={{ background: current.accent, boxShadow: `0 0 16px ${current.accent}` }} />
+            <p className="text-white font-bold leading-tight mb-3"
+              style={{ fontSize: '2.4rem', textShadow: '0 2px 24px rgba(0,0,0,0.5)' }}>
               {current.caption}
             </p>
-            <p className="text-blue-200 text-base opacity-90">{current.sub}</p>
+            <p className="text-white/70 text-lg">{current.sub}</p>
           </div>
  
-          {/* Slide dots */}
-          <div className="flex gap-2 mt-6">
+          {/* Dots */}
+          <div className="flex gap-2 mt-8">
             {SLIDES.map((_, i) => (
-              <button
-                key={i}
-                onClick={() => { setFadeIn(false); setTimeout(() => { setSlide(i); setFadeIn(true); }, 300); }}
-                className="transition-all duration-300 rounded-full"
+              <button key={i}
+                onClick={() => { setVisible(false); setTimeout(() => { setSlide(i); setVisible(true); }, 300); }}
+                className="rounded-full transition-all duration-500"
                 style={{
-                  width: i === slide ? '28px' : '8px',
+                  width: i === slide ? '32px' : '8px',
                   height: '8px',
-                  background: i === slide ? 'white' : 'rgba(255,255,255,0.4)',
+                  background: i === slide ? current.accent : 'rgba(255,255,255,0.35)',
+                  boxShadow: i === slide ? `0 0 12px ${current.accent}` : 'none',
                 }}
               />
             ))}
@@ -178,42 +199,45 @@ export default function Login() {
         </div>
       </div>
  
-      {/* ── Right: Login Panel ── */}
-      <div className="w-full lg:w-[480px] flex items-center justify-center relative" style={{ background: '#0a0f1e' }}>
- 
-        {/* Subtle glow behind form */}
-        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full pointer-events-none"
-          style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)' }} />
- 
-        <div className="relative z-10 w-full max-w-sm px-8 py-10">
+      {/* ── Right: Glass Login Panel ── */}
+      <div className="w-full lg:w-[460px] flex items-center justify-center relative z-20 p-6">
+        <div className="w-full max-w-sm rounded-3xl px-8 py-10"
+          style={{
+            background: 'rgba(255,255,255,0.13)',
+            backdropFilter: 'blur(32px)',
+            WebkitBackdropFilter: 'blur(32px)',
+            border: '1px solid rgba(255,255,255,0.25)',
+            boxShadow: '0 24px 80px rgba(0,0,0,0.35), inset 0 1px 0 rgba(255,255,255,0.3)',
+          }}>
  
           {/* Mobile logo */}
           <div className="lg:hidden flex items-center gap-3 mb-8">
-            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)' }}>
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
-                <path d="M3 3h18v4H3V3zm0 7h12v4H3v-4zm0 7h18v4H3v-4z" fill="white" fillOpacity="0.9"/>
+            <div className="w-9 h-9 rounded-xl flex items-center justify-center"
+              style={{ background: 'rgba(255,255,255,0.2)', border: '1px solid rgba(255,255,255,0.3)' }}>
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none">
+                <path d="M3 3h18v4H3V3zm0 7h12v4H3v-4zm0 7h18v4H3v-4z" fill="white"/>
               </svg>
             </div>
-            <span className="text-white font-bold text-xl">FinStatement</span>
+            <span className="text-white font-bold text-lg">FinStatement</span>
           </div>
  
           {/* Heading */}
-          <div className="mb-8">
+          <div className="mb-7">
             <h1 className="text-2xl font-bold text-white mb-1">Welcome back</h1>
-            <p className="text-slate-400 text-sm">Sign in to your account</p>
+            <p className="text-white/60 text-sm">Sign in to your account</p>
           </div>
  
           {/* Wake-up banner */}
           {waking && (
-            <div className="mb-5 px-4 py-3 rounded-xl text-sm flex items-center gap-3"
-              style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.25)' }}>
-              <svg className="animate-spin w-4 h-4 text-indigo-400 shrink-0" viewBox="0 0 24 24" fill="none">
+            <div className="mb-4 px-4 py-3 rounded-2xl text-sm flex items-center gap-3"
+              style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.2)' }}>
+              <svg className="animate-spin w-4 h-4 text-white shrink-0" viewBox="0 0 24 24" fill="none">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
                 <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
               </svg>
               <div>
-                <p className="text-indigo-300 font-medium">Server waking up…</p>
-                <p className="text-indigo-400 text-xs mt-0.5">~30s on first load ({wakeSecs}s). Signing in automatically.</p>
+                <p className="text-white font-medium">Server waking up…</p>
+                <p className="text-white/60 text-xs mt-0.5">~30s on first load ({wakeSecs}s elapsed)</p>
               </div>
             </div>
           )}
@@ -221,25 +245,29 @@ export default function Login() {
           <form onSubmit={submit} className="space-y-4">
             {/* Email */}
             <div>
-              <label className="block text-xs font-semibold text-slate-400 mb-1.5 tracking-wide">EMAIL ADDRESS</label>
+              <label className="block text-xs font-semibold text-white/70 mb-1.5 tracking-widest uppercase">Email</label>
               <input
                 type="email" required autoFocus
                 value={form.email}
                 onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                 placeholder="you@firm.com"
                 disabled={isWorking}
-                className="w-full px-4 py-3 rounded-xl text-sm text-white placeholder-slate-600 outline-none disabled:opacity-50"
-                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', transition: 'border-color 0.2s' }}
-                onFocus={e => e.target.style.borderColor = 'rgba(99,102,241,0.6)'}
-                onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.08)'}
+                className="w-full px-4 py-3 rounded-xl text-sm text-white placeholder-white/30 outline-none disabled:opacity-50"
+                style={{
+                  background: 'rgba(255,255,255,0.10)',
+                  border: '1px solid rgba(255,255,255,0.18)',
+                  transition: 'all 0.2s',
+                }}
+                onFocus={e => { e.target.style.background = 'rgba(255,255,255,0.16)'; e.target.style.borderColor = 'rgba(255,255,255,0.45)'; }}
+                onBlur={e => { e.target.style.background = 'rgba(255,255,255,0.10)'; e.target.style.borderColor = 'rgba(255,255,255,0.18)'; }}
               />
             </div>
  
             {/* Password */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-semibold text-slate-400 tracking-wide">PASSWORD</label>
-                <button type="button" className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">Forgot password?</button>
+                <label className="block text-xs font-semibold text-white/70 tracking-widest uppercase">Password</label>
+                <button type="button" className="text-xs text-white/60 hover:text-white transition-colors">Forgot?</button>
               </div>
               <div className="relative">
                 <input
@@ -248,13 +276,17 @@ export default function Login() {
                   onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
                   placeholder="••••••••••"
                   disabled={isWorking}
-                  className="w-full px-4 py-3 pr-11 rounded-xl text-sm text-white placeholder-slate-600 outline-none disabled:opacity-50"
-                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', transition: 'border-color 0.2s' }}
-                  onFocus={e => e.target.style.borderColor = 'rgba(99,102,241,0.6)'}
-                  onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.08)'}
+                  className="w-full px-4 py-3 pr-11 rounded-xl text-sm text-white placeholder-white/30 outline-none disabled:opacity-50"
+                  style={{
+                    background: 'rgba(255,255,255,0.10)',
+                    border: '1px solid rgba(255,255,255,0.18)',
+                    transition: 'all 0.2s',
+                  }}
+                  onFocus={e => { e.target.style.background = 'rgba(255,255,255,0.16)'; e.target.style.borderColor = 'rgba(255,255,255,0.45)'; }}
+                  onBlur={e => { e.target.style.background = 'rgba(255,255,255,0.10)'; e.target.style.borderColor = 'rgba(255,255,255,0.18)'; }}
                 />
                 <button type="button" onClick={() => setShowPass(p => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors text-sm">
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-white/50 hover:text-white/90 transition-colors text-sm">
                   {showPass ? '🙈' : '👁'}
                 </button>
               </div>
@@ -262,11 +294,18 @@ export default function Login() {
  
             {/* Sign In */}
             <button type="submit" disabled={isWorking}
-              className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-all duration-200 mt-2 disabled:opacity-60"
+              className="w-full py-3 rounded-xl text-sm font-bold text-white mt-2 transition-all duration-200 disabled:opacity-60"
               style={{
-                background: isWorking ? 'rgba(99,102,241,0.4)' : 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
-                boxShadow: isWorking ? 'none' : '0 4px 24px rgba(79,70,229,0.4)',
-              }}>
+                background: isWorking
+                  ? 'rgba(255,255,255,0.15)'
+                  : 'rgba(255,255,255,0.22)',
+                border: '1px solid rgba(255,255,255,0.35)',
+                backdropFilter: 'blur(8px)',
+                boxShadow: isWorking ? 'none' : '0 4px 20px rgba(0,0,0,0.2), inset 0 1px 0 rgba(255,255,255,0.3)',
+              }}
+              onMouseEnter={e => { if (!isWorking) e.currentTarget.style.background = 'rgba(255,255,255,0.30)'; }}
+              onMouseLeave={e => { if (!isWorking) e.currentTarget.style.background = 'rgba(255,255,255,0.22)'; }}
+            >
               {waking ? (
                 <span className="flex items-center justify-center gap-2">
                   <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
@@ -283,15 +322,15 @@ export default function Login() {
                   </svg>
                   Signing in…
                 </span>
-              ) : 'Sign In'}
+              ) : 'Sign In →'}
             </button>
           </form>
  
           {/* Divider */}
           <div className="flex items-center gap-3 my-5">
-            <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
-            <span className="text-xs text-slate-600">or continue with</span>
-            <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
+            <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.15)' }} />
+            <span className="text-xs text-white/40">or</span>
+            <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.15)' }} />
           </div>
  
           {/* Social */}
@@ -316,10 +355,10 @@ export default function Login() {
             ].map(s => (
               <button key={s.name} type="button"
                 onClick={() => toast('Coming soon', { icon: '🔐' })}
-                className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm text-slate-400 hover:text-slate-200 transition-all"
-                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
-                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}>
+                className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm text-white/70 hover:text-white transition-all"
+                style={{ background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.16)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}>
                 {s.icon}
                 <span>{s.name}</span>
               </button>
@@ -327,16 +366,15 @@ export default function Login() {
           </div>
  
           {/* Register */}
-          <p className="text-center text-xs text-slate-600 mt-6">
+          <p className="text-center text-xs text-white/40 mt-6">
             New firm?{' '}
-            <Link to="/register" className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
+            <Link to="/register" className="text-white/80 hover:text-white font-semibold transition-colors underline underline-offset-2">
               Create an account
             </Link>
           </p>
  
-          {/* Footer */}
-          <p className="text-center text-xs mt-8" style={{ color: 'rgba(255,255,255,0.15)' }}>
-            Supports AS · Ind AS · IFRS · IFRS SME
+          <p className="text-center text-xs text-white/20 mt-5">
+            AS · Ind AS · IFRS · IFRS SME
           </p>
         </div>
       </div>
