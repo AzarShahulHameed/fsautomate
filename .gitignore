@@ -22,3 +22,5 @@ backend/prisma/migrations/
 
 # Uploads
 backend/uploads/
+node_modules
+frontend/node_modules
