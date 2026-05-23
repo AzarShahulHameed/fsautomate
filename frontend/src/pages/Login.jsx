@@ -1,171 +1,300 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { authAPI } from '../api/client';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
-
+ 
+const BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:4000' : 'https://fsautomate.onrender.com');
+ 
+async function pingBackend() {
+  try {
+    const res = await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(5000) });
+    return res.ok;
+  } catch { return false; }
+}
+ 
+async function waitForBackend(maxWait = 90000, interval = 3000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWait) {
+    if (await pingBackend()) return true;
+    await new Promise(r => setTimeout(r, interval));
+  }
+  return false;
+}
+ 
+// Financial background slides using Unsplash
+const SLIDES = [
+  {
+    url: 'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1600&q=80',
+    caption: 'Real-time financial intelligence',
+    sub: 'Track every rupee, every dirham',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1590283603385-17ffb3a7f29f?w=1600&q=80',
+    caption: 'Compliance made simple',
+    sub: 'AS · Ind AS · IFRS · IFRS SME',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1551288049-bebda4e38f71?w=1600&q=80',
+    caption: 'From trial balance to financial statements',
+    sub: 'Automated mapping, zero errors',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=1600&q=80',
+    caption: 'Multi-client. Multi-region.',
+    sub: 'India & UAE under one platform',
+  },
+  {
+    url: 'https://images.unsplash.com/photo-1642790106117-e829e14a795f?w=1600&q=80',
+    caption: 'Audit-ready in minutes',
+    sub: 'Schedule III · Notes · Disclosures',
+  },
+];
+ 
 export default function Login() {
-  const [form, setForm]     = useState({ email: '', password: '' });
-  const [loading, setLoading] = useState(false);
+  const [form, setForm]         = useState({ email: '', password: '' });
+  const [loading, setLoading]   = useState(false);
+  const [waking, setWaking]     = useState(false);
+  const [wakeSecs, setWakeSecs] = useState(0);
   const [showPass, setShowPass] = useState(false);
+  const [slide, setSlide]       = useState(0);
+  const [fadeIn, setFadeIn]     = useState(true);
+ 
   const { setAuth } = useStore();
-  const navigate = useNavigate();
-
+  const navigate    = useNavigate();
+ 
+  // Slideshow
+  useEffect(() => {
+    const t = setInterval(() => {
+      setFadeIn(false);
+      setTimeout(() => {
+        setSlide(s => (s + 1) % SLIDES.length);
+        setFadeIn(true);
+      }, 700);
+    }, 4000);
+    return () => clearInterval(t);
+  }, []);
+ 
+  // Pre-warm
+  useEffect(() => { pingBackend(); }, []);
+ 
+  // Wake counter
+  useEffect(() => {
+    if (!waking) { setWakeSecs(0); return; }
+    const t = setInterval(() => setWakeSecs(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [waking]);
+ 
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
+    const awake = await pingBackend();
+    if (!awake) {
+      setWaking(true);
+      toast('Server is starting up…', { icon: '⏳', duration: 10000 });
+      const cameUp = await waitForBackend();
+      setWaking(false);
+      if (!cameUp) {
+        toast.error('Server took too long. Please try again.');
+        setLoading(false);
+        return;
+      }
+    }
     try {
       const res = await authAPI.login(form);
       setAuth(res.token, res.user, res.firm);
-      navigate('/', { replace: true });
+      navigate('/');
     } catch (err) {
       toast.error(err?.error || err?.message || 'Invalid email or password');
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
-
+ 
+  const isWorking = loading || waking;
+  const current   = SLIDES[slide];
+ 
   return (
-    <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-slate-950">
-
-      {/* ── Animated background ── */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {/* Gradient orbs */}
-        <div className="absolute -top-40 -left-40 w-96 h-96 bg-indigo-600 rounded-full opacity-20 blur-3xl animate-pulse" />
-        <div className="absolute top-1/2 -right-40 w-80 h-80 bg-purple-600 rounded-full opacity-15 blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
-        <div className="absolute -bottom-20 left-1/3 w-72 h-72 bg-blue-500 rounded-full opacity-10 blur-3xl animate-pulse" style={{ animationDelay: '2s' }} />
-
-        {/* Grid lines */}
-        <div className="absolute inset-0 opacity-5"
+    <div className="min-h-screen flex overflow-hidden" style={{ fontFamily: "'DM Sans', system-ui, sans-serif" }}>
+ 
+      {/* ── Left: Slideshow ── */}
+      <div className="hidden lg:flex flex-1 relative overflow-hidden">
+        {/* Background image */}
+        <div
+          className="absolute inset-0 bg-cover bg-center transition-all"
           style={{
-            backgroundImage: `linear-gradient(rgba(99,102,241,0.3) 1px, transparent 1px),
-                              linear-gradient(90deg, rgba(99,102,241,0.3) 1px, transparent 1px)`,
-            backgroundSize: '60px 60px',
+            backgroundImage: `url(${current.url})`,
+            opacity: fadeIn ? 1 : 0,
+            transition: 'opacity 0.7s ease-in-out',
           }}
         />
-
-        {/* Floating text elements */}
-        {['Balance Sheet','P&L Statement','Trial Balance','Cash Flow','IFRS','Ind AS','AS 3','Schedule III','₹','$'].map((t, i) => (
-          <div key={i}
-            className="absolute text-indigo-400 opacity-10 font-mono text-sm select-none"
-            style={{
-              left: `${10 + (i * 9.3) % 80}%`,
-              top: `${5 + (i * 13.7) % 85}%`,
-              animation: `float ${4 + i * 0.7}s ease-in-out infinite`,
-              animationDelay: `${i * 0.4}s`,
-            }}
-          >
-            {t}
-          </div>
-        ))}
-      </div>
-
-      {/* ── Glass card ── */}
-      <div className="relative z-10 w-full max-w-sm mx-4">
-        {/* Logo / Brand */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center justify-center w-14 h-14 rounded-2xl bg-gradient-to-br from-indigo-500 to-purple-600 shadow-2xl mb-4">
-            <svg width="28" height="28" viewBox="0 0 24 24" fill="none">
+ 
+        {/* Dark overlay */}
+        <div className="absolute inset-0" style={{ background: 'linear-gradient(135deg, rgba(5,10,30,0.75) 0%, rgba(10,15,50,0.55) 100%)' }} />
+ 
+        {/* Brand top-left */}
+        <div className="absolute top-8 left-8 flex items-center gap-3 z-10">
+          <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(255,255,255,0.15)', backdropFilter: 'blur(10px)', border: '1px solid rgba(255,255,255,0.2)' }}>
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
               <path d="M3 3h18v4H3V3zm0 7h12v4H3v-4zm0 7h18v4H3v-4z" fill="white" fillOpacity="0.9"/>
             </svg>
           </div>
-          <h1 className="text-2xl font-semibold text-white tracking-tight">FinStatement</h1>
-          <p className="text-slate-400 text-sm mt-1">Financial Statement Platform</p>
+          <div>
+            <div className="text-white font-bold text-lg leading-none">FinStatement</div>
+            <div className="text-blue-200 text-xs opacity-80">Financial Platform</div>
+          </div>
         </div>
-
-        {/* Card */}
-        <div
-          className="rounded-3xl p-8 shadow-2xl"
-          style={{
-            background: 'rgba(255,255,255,0.06)',
-            backdropFilter: 'blur(40px)',
-            WebkitBackdropFilter: 'blur(40px)',
-            border: '1px solid rgba(255,255,255,0.12)',
-          }}
-        >
-          <h2 className="text-xl font-semibold text-white mb-1">Welcome back</h2>
-          <p className="text-slate-400 text-sm mb-6">Sign in to your account</p>
-
+ 
+        {/* Bottom caption */}
+        <div className="absolute bottom-12 left-8 right-8 z-10">
+          <div
+            style={{
+              opacity: fadeIn ? 1 : 0,
+              transform: fadeIn ? 'translateY(0)' : 'translateY(8px)',
+              transition: 'all 0.7s ease-in-out',
+            }}
+          >
+            <p className="text-white text-3xl font-bold leading-tight mb-2" style={{ textShadow: '0 2px 20px rgba(0,0,0,0.5)' }}>
+              {current.caption}
+            </p>
+            <p className="text-blue-200 text-base opacity-90">{current.sub}</p>
+          </div>
+ 
+          {/* Slide dots */}
+          <div className="flex gap-2 mt-6">
+            {SLIDES.map((_, i) => (
+              <button
+                key={i}
+                onClick={() => { setFadeIn(false); setTimeout(() => { setSlide(i); setFadeIn(true); }, 300); }}
+                className="transition-all duration-300 rounded-full"
+                style={{
+                  width: i === slide ? '28px' : '8px',
+                  height: '8px',
+                  background: i === slide ? 'white' : 'rgba(255,255,255,0.4)',
+                }}
+              />
+            ))}
+          </div>
+        </div>
+      </div>
+ 
+      {/* ── Right: Login Panel ── */}
+      <div className="w-full lg:w-[480px] flex items-center justify-center relative" style={{ background: '#0a0f1e' }}>
+ 
+        {/* Subtle glow behind form */}
+        <div className="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 w-96 h-96 rounded-full pointer-events-none"
+          style={{ background: 'radial-gradient(circle, rgba(99,102,241,0.12) 0%, transparent 70%)' }} />
+ 
+        <div className="relative z-10 w-full max-w-sm px-8 py-10">
+ 
+          {/* Mobile logo */}
+          <div className="lg:hidden flex items-center gap-3 mb-8">
+            <div className="w-10 h-10 rounded-xl flex items-center justify-center" style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)' }}>
+              <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+                <path d="M3 3h18v4H3V3zm0 7h12v4H3v-4zm0 7h18v4H3v-4z" fill="white" fillOpacity="0.9"/>
+              </svg>
+            </div>
+            <span className="text-white font-bold text-xl">FinStatement</span>
+          </div>
+ 
+          {/* Heading */}
+          <div className="mb-8">
+            <h1 className="text-2xl font-bold text-white mb-1">Welcome back</h1>
+            <p className="text-slate-400 text-sm">Sign in to your account</p>
+          </div>
+ 
+          {/* Wake-up banner */}
+          {waking && (
+            <div className="mb-5 px-4 py-3 rounded-xl text-sm flex items-center gap-3"
+              style={{ background: 'rgba(99,102,241,0.12)', border: '1px solid rgba(99,102,241,0.25)' }}>
+              <svg className="animate-spin w-4 h-4 text-indigo-400 shrink-0" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              <div>
+                <p className="text-indigo-300 font-medium">Server waking up…</p>
+                <p className="text-indigo-400 text-xs mt-0.5">~30s on first load ({wakeSecs}s). Signing in automatically.</p>
+              </div>
+            </div>
+          )}
+ 
           <form onSubmit={submit} className="space-y-4">
             {/* Email */}
             <div>
-              <label className="block text-xs font-medium text-slate-300 mb-1.5">Email address</label>
+              <label className="block text-xs font-semibold text-slate-400 mb-1.5 tracking-wide">EMAIL ADDRESS</label>
               <input
                 type="email" required autoFocus
                 value={form.email}
                 onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                 placeholder="you@firm.com"
-                className="w-full px-4 py-3 rounded-xl text-sm text-white placeholder-slate-500 outline-none transition-all"
-                style={{
-                  background: 'rgba(255,255,255,0.07)',
-                  border: '1px solid rgba(255,255,255,0.12)',
-                }}
-                onFocus={e => e.target.style.border = '1px solid rgba(99,102,241,0.7)'}
-                onBlur={e => e.target.style.border = '1px solid rgba(255,255,255,0.12)'}
+                disabled={isWorking}
+                className="w-full px-4 py-3 rounded-xl text-sm text-white placeholder-slate-600 outline-none disabled:opacity-50"
+                style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', transition: 'border-color 0.2s' }}
+                onFocus={e => e.target.style.borderColor = 'rgba(99,102,241,0.6)'}
+                onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.08)'}
               />
             </div>
-
+ 
             {/* Password */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
-                <label className="block text-xs font-medium text-slate-300">Password</label>
-                <button type="button" className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">
-                  Forgot password?
-                </button>
+                <label className="block text-xs font-semibold text-slate-400 tracking-wide">PASSWORD</label>
+                <button type="button" className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">Forgot password?</button>
               </div>
               <div className="relative">
                 <input
                   type={showPass ? 'text' : 'password'} required
                   value={form.password}
                   onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
-                  placeholder="Enter your password"
-                  className="w-full px-4 py-3 pr-10 rounded-xl text-sm text-white placeholder-slate-500 outline-none transition-all"
-                  style={{
-                    background: 'rgba(255,255,255,0.07)',
-                    border: '1px solid rgba(255,255,255,0.12)',
-                  }}
-                  onFocus={e => e.target.style.border = '1px solid rgba(99,102,241,0.7)'}
-                  onBlur={e => e.target.style.border = '1px solid rgba(255,255,255,0.12)'}
+                  placeholder="••••••••••"
+                  disabled={isWorking}
+                  className="w-full px-4 py-3 pr-11 rounded-xl text-sm text-white placeholder-slate-600 outline-none disabled:opacity-50"
+                  style={{ background: 'rgba(255,255,255,0.05)', border: '1px solid rgba(255,255,255,0.08)', transition: 'border-color 0.2s' }}
+                  onFocus={e => e.target.style.borderColor = 'rgba(99,102,241,0.6)'}
+                  onBlur={e => e.target.style.borderColor = 'rgba(255,255,255,0.08)'}
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPass(p => !p)}
-                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors"
-                >
+                <button type="button" onClick={() => setShowPass(p => !p)}
+                  className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300 transition-colors text-sm">
                   {showPass ? '🙈' : '👁'}
                 </button>
               </div>
             </div>
-
-            {/* Sign in button */}
-            <button
-              type="submit" disabled={loading}
-              className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-all duration-200 disabled:opacity-60 mt-2"
+ 
+            {/* Sign In */}
+            <button type="submit" disabled={isWorking}
+              className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-all duration-200 mt-2 disabled:opacity-60"
               style={{
-                background: loading
-                  ? 'rgba(99,102,241,0.5)'
-                  : 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-                boxShadow: loading ? 'none' : '0 8px 32px rgba(99,102,241,0.4)',
-              }}
-            >
-              {loading ? (
+                background: isWorking ? 'rgba(99,102,241,0.4)' : 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
+                boxShadow: isWorking ? 'none' : '0 4px 24px rgba(79,70,229,0.4)',
+              }}>
+              {waking ? (
                 <span className="flex items-center justify-center gap-2">
                   <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4"/>
                     <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
                   </svg>
-                  Signing in...
+                  Waking server… {wakeSecs}s
+                </span>
+              ) : loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4"/>
+                    <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  Signing in…
                 </span>
               ) : 'Sign In'}
             </button>
           </form>
-
+ 
           {/* Divider */}
           <div className="flex items-center gap-3 my-5">
-            <div className="flex-1 h-px bg-white opacity-10" />
-            <span className="text-xs text-slate-500">or continue with</span>
-            <div className="flex-1 h-px bg-white opacity-10" />
+            <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
+            <span className="text-xs text-slate-600">or continue with</span>
+            <div className="flex-1 h-px" style={{ background: 'rgba(255,255,255,0.07)' }} />
           </div>
-
-          {/* Social buttons — UI only, no function yet */}
+ 
+          {/* Social */}
           <div className="grid grid-cols-2 gap-3">
             {[
               { name: 'Google', icon: (
@@ -185,48 +314,32 @@ export default function Login() {
                 </svg>
               )},
             ].map(s => (
-              <button
-                key={s.name}
-                type="button"
-                onClick={() => {
-                const base = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://fsautomate.onrender.com');
-                window.location.href = `${base}/api/auth/${s.name.toLowerCase()}`;
-              }}
-                className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm text-slate-300 transition-all hover:text-white"
-                style={{
-                  background: 'rgba(255,255,255,0.05)',
-                  border: '1px solid rgba(255,255,255,0.1)',
-                }}
-                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.10)'}
-                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.05)'}
-              >
+              <button key={s.name} type="button"
+                onClick={() => toast('Coming soon', { icon: '🔐' })}
+                className="flex items-center justify-center gap-2 py-2.5 rounded-xl text-sm text-slate-400 hover:text-slate-200 transition-all"
+                style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)' }}
+                onMouseEnter={e => e.currentTarget.style.background = 'rgba(255,255,255,0.08)'}
+                onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.04)'}>
                 {s.icon}
                 <span>{s.name}</span>
               </button>
             ))}
           </div>
-
-          {/* Register link */}
-          <p className="text-center text-xs text-slate-500 mt-6">
+ 
+          {/* Register */}
+          <p className="text-center text-xs text-slate-600 mt-6">
             New firm?{' '}
             <Link to="/register" className="text-indigo-400 hover:text-indigo-300 font-medium transition-colors">
               Create an account
             </Link>
           </p>
+ 
+          {/* Footer */}
+          <p className="text-center text-xs mt-8" style={{ color: 'rgba(255,255,255,0.15)' }}>
+            Supports AS · Ind AS · IFRS · IFRS SME
+          </p>
         </div>
-
-        {/* Footer */}
-        <p className="text-center text-xs text-slate-600 mt-6">
-          Supports AS · Ind AS · IFRS · IFRS SME
-        </p>
       </div>
-
-      <style>{`
-        @keyframes float {
-          0%, 100% { transform: translateY(0px); }
-          50% { transform: translateY(-12px); }
-        }
-      `}</style>
     </div>
   );
 }
