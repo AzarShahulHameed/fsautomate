@@ -6,7 +6,7 @@
     "start": "node server.js",
     "migrate": "knex migrate:latest",
     "seed": "knex seed:run",
-    "build": "npm install && npx prisma generate"
+    "build": "npm install && npx prisma@5.22.0 generate"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
