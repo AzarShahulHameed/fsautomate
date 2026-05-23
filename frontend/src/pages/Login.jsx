@@ -1,39 +1,94 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { authAPI } from '../api/client';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
-
+ 
+const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+ 
+// Ping the backend health endpoint — returns true when awake
+async function pingBackend() {
+  try {
+    const res = await fetch(`${BASE}/health`, { signal: AbortSignal.timeout(5000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+ 
+// Wait until the backend responds, up to maxWait ms
+async function waitForBackend(maxWait = 90000, interval = 3000) {
+  const start = Date.now();
+  while (Date.now() - start < maxWait) {
+    if (await pingBackend()) return true;
+    await new Promise(r => setTimeout(r, interval));
+  }
+  return false;
+}
+ 
 export default function Login() {
-  const [form, setForm]     = useState({ email: '', password: '' });
-  const [loading, setLoading] = useState(false);
+  const [form, setForm]         = useState({ email: '', password: '' });
+  const [loading, setLoading]   = useState(false);
+  const [waking, setWaking]     = useState(false);   // server cold-start state
+  const [wakeSecs, setWakeSecs] = useState(0);
   const [showPass, setShowPass] = useState(false);
   const { setAuth } = useStore();
   const navigate = useNavigate();
-
+ 
+  // Pre-warm the backend as soon as the login page loads
+  useEffect(() => {
+    pingBackend(); // fire-and-forget — just starts the wake-up early
+  }, []);
+ 
+  // Tick the "waking up" counter every second
+  useEffect(() => {
+    if (!waking) { setWakeSecs(0); return; }
+    const t = setInterval(() => setWakeSecs(s => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [waking]);
+ 
   const submit = async (e) => {
     e.preventDefault();
     setLoading(true);
+ 
+    // 1. Quick ping — is the server already awake?
+    const awake = await pingBackend();
+    if (!awake) {
+      // Server is sleeping — show friendly wake-up UI and wait
+      setWaking(true);
+      toast('Server is starting up, please wait…', { icon: '⏳', duration: 10000 });
+      const cameUp = await waitForBackend();
+      setWaking(false);
+      if (!cameUp) {
+        toast.error('Server took too long to respond. Please try again in a moment.');
+        setLoading(false);
+        return;
+      }
+    }
+ 
+    // 2. Server is awake — attempt login
     try {
       const res = await authAPI.login(form);
       setAuth(res.token, res.user, res.firm);
       navigate('/');
     } catch (err) {
       toast.error(err?.error || err?.message || 'Invalid email or password');
-    } finally { setLoading(false); }
+    } finally {
+      setLoading(false);
+    }
   };
-
+ 
+  const isWorking = loading || waking;
+ 
   return (
     <div className="min-h-screen flex items-center justify-center relative overflow-hidden bg-slate-950">
-
+ 
       {/* ── Animated background ── */}
       <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        {/* Gradient orbs */}
         <div className="absolute -top-40 -left-40 w-96 h-96 bg-indigo-600 rounded-full opacity-20 blur-3xl animate-pulse" />
         <div className="absolute top-1/2 -right-40 w-80 h-80 bg-purple-600 rounded-full opacity-15 blur-3xl animate-pulse" style={{ animationDelay: '1s' }} />
         <div className="absolute -bottom-20 left-1/3 w-72 h-72 bg-blue-500 rounded-full opacity-10 blur-3xl animate-pulse" style={{ animationDelay: '2s' }} />
-
-        {/* Grid lines */}
+ 
         <div className="absolute inset-0 opacity-5"
           style={{
             backgroundImage: `linear-gradient(rgba(99,102,241,0.3) 1px, transparent 1px),
@@ -41,8 +96,7 @@ export default function Login() {
             backgroundSize: '60px 60px',
           }}
         />
-
-        {/* Floating text elements */}
+ 
         {['Balance Sheet','P&L Statement','Trial Balance','Cash Flow','IFRS','Ind AS','AS 3','Schedule III','₹','$'].map((t, i) => (
           <div key={i}
             className="absolute text-indigo-400 opacity-10 font-mono text-sm select-none"
@@ -57,7 +111,7 @@ export default function Login() {
           </div>
         ))}
       </div>
-
+ 
       {/* ── Glass card ── */}
       <div className="relative z-10 w-full max-w-sm mx-4">
         {/* Logo / Brand */}
@@ -70,7 +124,7 @@ export default function Login() {
           <h1 className="text-2xl font-semibold text-white tracking-tight">FinStatement</h1>
           <p className="text-slate-400 text-sm mt-1">Financial Statement Platform</p>
         </div>
-
+ 
         {/* Card */}
         <div
           className="rounded-3xl p-8 shadow-2xl"
@@ -83,7 +137,26 @@ export default function Login() {
         >
           <h2 className="text-xl font-semibold text-white mb-1">Welcome back</h2>
           <p className="text-slate-400 text-sm mb-6">Sign in to your account</p>
-
+ 
+          {/* Wake-up banner */}
+          {waking && (
+            <div
+              className="mb-4 px-4 py-3 rounded-xl text-sm flex items-center gap-3"
+              style={{ background: 'rgba(99,102,241,0.15)', border: '1px solid rgba(99,102,241,0.3)' }}
+            >
+              <svg className="animate-spin w-4 h-4 text-indigo-400 shrink-0" viewBox="0 0 24 24" fill="none">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+              </svg>
+              <div>
+                <p className="text-indigo-300 font-medium">Server is waking up…</p>
+                <p className="text-indigo-400 text-xs mt-0.5">
+                  This takes ~30s on first load ({wakeSecs}s elapsed). You'll be signed in automatically.
+                </p>
+              </div>
+            </div>
+          )}
+ 
           <form onSubmit={submit} className="space-y-4">
             {/* Email */}
             <div>
@@ -93,7 +166,8 @@ export default function Login() {
                 value={form.email}
                 onChange={e => setForm(f => ({ ...f, email: e.target.value }))}
                 placeholder="you@firm.com"
-                className="w-full px-4 py-3 rounded-xl text-sm text-white placeholder-slate-500 outline-none transition-all"
+                disabled={isWorking}
+                className="w-full px-4 py-3 rounded-xl text-sm text-white placeholder-slate-500 outline-none transition-all disabled:opacity-50"
                 style={{
                   background: 'rgba(255,255,255,0.07)',
                   border: '1px solid rgba(255,255,255,0.12)',
@@ -102,7 +176,7 @@ export default function Login() {
                 onBlur={e => e.target.style.border = '1px solid rgba(255,255,255,0.12)'}
               />
             </div>
-
+ 
             {/* Password */}
             <div>
               <div className="flex items-center justify-between mb-1.5">
@@ -117,7 +191,8 @@ export default function Login() {
                   value={form.password}
                   onChange={e => setForm(f => ({ ...f, password: e.target.value }))}
                   placeholder="Enter your password"
-                  className="w-full px-4 py-3 pr-10 rounded-xl text-sm text-white placeholder-slate-500 outline-none transition-all"
+                  disabled={isWorking}
+                  className="w-full px-4 py-3 pr-10 rounded-xl text-sm text-white placeholder-slate-500 outline-none transition-all disabled:opacity-50"
                   style={{
                     background: 'rgba(255,255,255,0.07)',
                     border: '1px solid rgba(255,255,255,0.12)',
@@ -134,38 +209,46 @@ export default function Login() {
                 </button>
               </div>
             </div>
-
+ 
             {/* Sign in button */}
             <button
-              type="submit" disabled={loading}
+              type="submit" disabled={isWorking}
               className="w-full py-3 rounded-xl text-sm font-semibold text-white transition-all duration-200 disabled:opacity-60 mt-2"
               style={{
-                background: loading
+                background: isWorking
                   ? 'rgba(99,102,241,0.5)'
                   : 'linear-gradient(135deg, #6366f1 0%, #8b5cf6 100%)',
-                boxShadow: loading ? 'none' : '0 8px 32px rgba(99,102,241,0.4)',
+                boxShadow: isWorking ? 'none' : '0 8px 32px rgba(99,102,241,0.4)',
               }}
             >
-              {loading ? (
+              {waking ? (
                 <span className="flex items-center justify-center gap-2">
                   <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4"/>
                     <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
                   </svg>
-                  Signing in...
+                  Waking server… {wakeSecs}s
+                </span>
+              ) : loading ? (
+                <span className="flex items-center justify-center gap-2">
+                  <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="white" strokeWidth="4"/>
+                    <path className="opacity-75" fill="white" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                  </svg>
+                  Signing in…
                 </span>
               ) : 'Sign In'}
             </button>
           </form>
-
+ 
           {/* Divider */}
           <div className="flex items-center gap-3 my-5">
             <div className="flex-1 h-px bg-white opacity-10" />
             <span className="text-xs text-slate-500">or continue with</span>
             <div className="flex-1 h-px bg-white opacity-10" />
           </div>
-
-          {/* Social buttons — UI only, no function yet */}
+ 
+          {/* Social buttons */}
           <div className="grid grid-cols-2 gap-3">
             {[
               { name: 'Google', icon: (
@@ -202,7 +285,7 @@ export default function Login() {
               </button>
             ))}
           </div>
-
+ 
           {/* Register link */}
           <p className="text-center text-xs text-slate-500 mt-6">
             New firm?{' '}
@@ -211,13 +294,13 @@ export default function Login() {
             </Link>
           </p>
         </div>
-
+ 
         {/* Footer */}
         <p className="text-center text-xs text-slate-600 mt-6">
           Supports AS · Ind AS · IFRS · IFRS SME
         </p>
       </div>
-
+ 
       <style>{`
         @keyframes float {
           0%, 100% { transform: translateY(0px); }
@@ -227,3 +310,4 @@ export default function Login() {
     </div>
   );
 }
+ 
