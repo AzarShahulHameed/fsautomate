@@ -6,7 +6,7 @@
     "start": "node server.js",
     "migrate": "knex migrate:latest",
     "seed": "knex seed:run",
-    "build": "npm install && ./node_modules/.bin/prisma generate"
+    "build": "npm install && npx prisma generate"
   },
   "dependencies": {
     "bcryptjs": "^2.4.3",
@@ -31,5 +31,8 @@
     "docx": "^8.5.0",
     "cloudinary": "^2.5.1",
     "prisma": "^5.22.0"
+  },
+  "engines": {
+    "node": ">=18.0.0 <22.0.0"
   }
 }
