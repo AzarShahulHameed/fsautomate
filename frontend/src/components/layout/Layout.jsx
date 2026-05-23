@@ -1,10 +1,11 @@
+
 import React from 'react';
 import { Outlet, NavLink, useNavigate } from 'react-router-dom';
 import { useStore } from '../../store';
 import {
   LayoutDashboard, Users, Upload, Link2,
   FileSpreadsheet, FileText, Edit3, Download, LogOut, Settings,
-  ShieldCheck, BookOpen, Grid3X3, FileCheck
+  ShieldCheck, BookOpen, LayoutGrid, FileCheck
 } from 'lucide-react';
  
 function SidebarAvatar({ user }) {
@@ -45,7 +46,7 @@ export default function Layout() {
       { to: `/engagements/${eid}/mapping`,    icon: Link2,          label: 'Mapping' },
       { to: `/engagements/${eid}/fs`,         icon: FileSpreadsheet,label: 'Financial Statements' },
       { to: `/engagements/${eid}/notes`,      icon: BookOpen,       label: 'Notes' },
-      { to: `/engagements/${eid}/schedules`,  icon: Grid3X3,        label: 'Schedules' },
+      { to: `/engagements/${eid}/schedules`,  icon: LayoutGrid,        label: 'Schedules' },
       { to: `/engagements/${eid}/validation`, icon: ShieldCheck,    label: 'Validation' },
       { divider: 'Report' },
       { to: `/engagements/${eid}/report`,     icon: Edit3,          label: 'Report Builder' },
