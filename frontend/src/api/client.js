@@ -1,12 +1,11 @@
 // src/api/client.js
 import axios from 'axios';
  
+const PROD_API = 'https://fsautomate.onrender.com';
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL
     ? `${import.meta.env.VITE_API_BASE_URL}/api`
-    : (window.location.hostname === 'localhost'
-        ? 'http://localhost:4000/api'
-        : 'https://fsautomate.onrender.com/api'),
+    : (import.meta.env.DEV ? 'http://localhost:4000/api' : `${PROD_API}/api`),
   withCredentials: true,  // Sends session cookie
   timeout: 60000,
 });
@@ -114,7 +113,7 @@ export const reportAPI = {
 };
  
 // ─── Export API (blob responses — bypass interceptor) ─────────────────────
-const BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://fsautomate.onrender.com');
+const BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:4000' : PROD_API);
  
 function authHeader() {
   try {
@@ -148,4 +147,3 @@ export const exportAPI = {
     { responseType: 'blob', withCredentials: true, headers: authHeader() }
   ).then(r => r.data),
 };
- 

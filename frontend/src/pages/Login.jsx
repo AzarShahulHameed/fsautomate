@@ -4,7 +4,7 @@ import { authAPI } from '../api/client';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
  
-const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
+const BASE = import.meta.env.VITE_API_BASE_URL || (import.meta.env.DEV ? 'http://localhost:4000' : 'https://fsautomate.onrender.com');
  
 // Ping the backend health endpoint — returns true when awake
 async function pingBackend() {
@@ -310,4 +310,3 @@ export default function Login() {
     </div>
   );
 }
- 
