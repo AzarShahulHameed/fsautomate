@@ -1,26 +1,59 @@
-# Dependencies
+# ── Environment files — NEVER commit ──────────────────────────────────────────
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+backend/.env
+backend/.env.example
+frontend/.env
+frontend/.env.example
+**/.env*
+!**/.env.example
+ 
+# ── Dependencies ───────────────────────────────────────────────────────────────
 node_modules/
 */node_modules/
-
-# Environment files — NEVER commit these
-.env
-backend/.env
-frontend/.env
-*.env.local
-
-# Build output
+**/node_modules/
+ 
+# ── Build output ───────────────────────────────────────────────────────────────
 dist/
 build/
+.next/
+out/
+ 
+# ── Logs ──────────────────────────────────────────────────────────────────────
 *.log
-
-# OS files
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+ 
+# ── Database backups — contain real data ──────────────────────────────────────
+*.sql
+backup*.sql
+dump*.sql
+ 
+# ── OS files ──────────────────────────────────────────────────────────────────
 .DS_Store
+.DS_Store?
 Thumbs.db
-
-# Prisma
-backend/prisma/migrations/
-
-# Uploads
+ehthumbs.db
+Desktop.ini
+ 
+# ── Uploaded files ────────────────────────────────────────────────────────────
 backend/uploads/
-node_modules
-frontend/node_modules
+uploads/
+ 
+# ── IDE files ─────────────────────────────────────────────────────────────────
+.vscode/settings.json
+.idea/
+*.swp
+*.swo
+ 
+# ── Prisma ────────────────────────────────────────────────────────────────────
+backend/prisma/migrations/
+ 
+# ── Test coverage ─────────────────────────────────────────────────────────────
+coverage/
+.nyc_output/
+ 
