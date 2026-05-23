@@ -10,6 +10,7 @@ import Layout              from './components/layout/Layout';
 import Login               from './pages/Login';
 import Register            from './pages/Register';
 import Settings from './pages/Settings';
+import OAuthCallback from './pages/OAuthCallback';
 import Dashboard           from './pages/Dashboard';
 import Clients             from './pages/Clients';
 import Engagements         from './pages/Engagements';
@@ -54,6 +55,7 @@ export default function App() {
       <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
       <Routes>
         <Route path="/login"    element={<Login />} />
+        <Route path="/oauth-callback" element={<OAuthCallback />} />
         <Route path="/register" element={<Register />} />
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
           <Route index element={<Dashboard />} />

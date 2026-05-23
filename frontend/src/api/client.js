@@ -57,6 +57,7 @@ export const clientAPI = {
   get:    (id)       => api.get(`/clients/${id}`),
   create: (data)     => api.post('/clients', data),
   update: (id, data) => api.put(`/clients/${id}`, data),
+  delete: (id)       => api.delete(`/clients/${id}`),
 };
  
 // ─── Engagement API ───────────────────────────────────────────────────────
@@ -147,3 +148,4 @@ export const exportAPI = {
     { responseType: 'blob', withCredentials: true, headers: authHeader() }
   ).then(r => r.data),
 };
+ 

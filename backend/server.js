@@ -20,6 +20,7 @@ const reportRoutes        = require('./src/routes/report.routes');
 const exportRoutes        = require('./src/routes/export.routes');
 const schedulesRoutes     = require('./src/routes/schedules.routes');
 const uploadRoutes        = require('./src/routes/upload.routes');
+const oauthRoutes         = require('./src/routes/oauth.routes');
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
@@ -104,6 +105,7 @@ app.use('/api/report',      reportRoutes);
 app.use('/api/export',      exportRoutes);
 app.use('/api/schedules',   schedulesRoutes);
 app.use('/api/upload',      uploadRoutes);
+app.use('/api/auth',        oauthRoutes);
 
 // ─── 404 ───────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
