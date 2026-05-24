@@ -1,21 +1,22 @@
 'use strict';
-
+ 
 const {
   Document, Packer, Paragraph, Table, TableRow, TableCell,
   TextRun, HeadingLevel, AlignmentType, PageBreak, WidthType,
   BorderStyle, ShadingType, Header, Footer, PageNumber,
-  NumberFormat, convertInchesToTwip, UnderlineType,
+  NumberFormat, convertInchesToTwip, UnderlineType, HeightRule,
 } = require('docx');
 const { prisma } = require('../config/db');
-
+ 
 // ── Number formatter ──────────────────────────────────────────────────────────
-function fmtNum(n, divisor = 1) {
+function fmtNum(n, divisor = 1, hideZero = false) {
   const num = Number(n || 0) / divisor;
+  if (hideZero && num === 0) return ''; // hide zero rows in export
   const abs = Math.abs(num);
   const s = abs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   return num < 0 ? `(${s})` : s;
 }
-
+ 
 // ── Strip HTML tags from rich text for docx ───────────────────────────────────
 function stripHtml(html) {
   if (!html) return '';
@@ -31,7 +32,7 @@ function stripHtml(html) {
     .replace(/&quot;/g, '"')
     .trim();
 }
-
+ 
 // ── Parse HTML to docx paragraphs (basic) ────────────────────────────────────
 function htmlToParagraphs(html) {
   if (!html) return [new Paragraph({ text: '' })];
@@ -44,7 +45,7 @@ function htmlToParagraphs(html) {
     .replace(/<li[^>]*>(.*?)<\/li>/gi, '§LI§$1§END§')
     .replace(/<p[^>]*>(.*?)<\/p>/gi, '§P§$1§END§')
     .split('§END§');
-
+ 
   for (const block of blocks) {
     const text = stripHtml(block.replace(/§[A-Z0-9]+§/g, '').trim());
     if (!text) continue;
@@ -68,7 +69,7 @@ function htmlToParagraphs(html) {
   }
   return paras.length ? paras : [new Paragraph({ text: stripHtml(html) })];
 }
-
+ 
 // ── Helper: section title paragraph ──────────────────────────────────────────
 function sectionTitle(text) {
   return new Paragraph({
@@ -78,17 +79,26 @@ function sectionTitle(text) {
     border: { bottom: { color: '6366f1', size: 6, space: 4, style: BorderStyle.SINGLE } },
   });
 }
-
+ 
 // ── Helper: page break paragraph ─────────────────────────────────────────────
 function pageBreak() {
   return new Paragraph({ children: [new PageBreak()] });
 }
-
+ 
 // ── Helper: BS/PL table row ───────────────────────────────────────────────────
 function fsRow(label, note, amount, bold, indent, divisor) {
   const labelRun  = new TextRun({ text: '  '.repeat(indent || 0) + label, bold: !!bold, size: 20 });
   const noteRun   = new TextRun({ text: note ? String(note) : '', size: 20, color: '6366f1' });
-  const amtRun    = new TextRun({ text: amount !== null && amount !== undefined ? fmtNum(amount, divisor) : '', bold: !!bold, size: 20 });
+  // Return empty invisible row for zero non-bold amounts (keeps array structure intact)
+  if (amount !== null && amount !== undefined && Math.abs(Number(amount)) < 0.005 && !bold) {
+    return new TableRow({
+      children: [
+        new TableCell({ children: [new Paragraph({ text: '' })], columnSpan: 3 }),
+      ],
+      height: { value: 0, rule: HeightRule.EXACT },
+    });
+  }
+  const amtRun    = new TextRun({ text: amount !== null && amount !== undefined ? fmtNum(amount, divisor, true) : '', bold: !!bold, size: 20 });
   return new TableRow({
     children: [
       new TableCell({ children: [new Paragraph({ children: [labelRun] })], width: { size: 65, type: WidthType.PERCENTAGE } }),
@@ -98,7 +108,7 @@ function fsRow(label, note, amount, bold, indent, divisor) {
     tableHeader: !!bold,
   });
 }
-
+ 
 // ── Front page ────────────────────────────────────────────────────────────────
 function buildFrontPage(engagement, frontPageContent) {
   const info = (() => { try { return JSON.parse(frontPageContent || '{}'); } catch { return {}; } })();
@@ -141,7 +151,7 @@ function buildFrontPage(engagement, frontPageContent) {
     pageBreak(),
   ];
 }
-
+ 
 // ── TOC ───────────────────────────────────────────────────────────────────────
 function buildTOC(sections) {
   const rows = sections
@@ -152,20 +162,20 @@ function buildTOC(sections) {
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(i + 1), size: 22 })], alignment: AlignmentType.RIGHT })], width: { size: 20, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } } }),
       ],
     }));
-
+ 
   return [
     sectionTitle('Table of Contents'),
     new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } }),
     pageBreak(),
   ];
 }
-
+ 
 // ── BS in Word ────────────────────────────────────────────────────────────────
 function buildBS(fsLines, divisor, method) {
   const lines = fsLines || [];
   const g = (kw) => lines.filter(l => kw.some(k => l.groupName?.toLowerCase().includes(k.toLowerCase()))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const n = (kw) => lines.find(l => kw.some(k => l.groupName?.toLowerCase().includes(k.toLowerCase())))?.noteGroup?.noteNumber;
-
+ 
   const sc=g(['share capital']), res=g(['r&s','reserves and surplus','retained earnings']), sfT=sc+res;
   const ltB=g(['long term borrowings','non-current borrowings']), dtl=g(['deferred tax liability']), oltl=g(['other long term liabilities']), ltp=g(['long term provisions']), ncLT=ltB+dtl+oltl+ltp;
   const stB=g(['short-term borrowings','short term borrowings']), tp=g(['trade payables']), ocl=g(['other current liabilities']), stp=g(['short term provisions']), clT=stB+tp+ocl+stp;
@@ -174,10 +184,10 @@ function buildBS(fsLines, divisor, method) {
   const ci=g(['current investments']), inv=g(['inventories','stock']), tr=g(['trade receivables','debtors']), cash=g(['cash']), stl=g(['short-term loans']), oca=g(['other current assets']), caT=ci+inv+tr+cash+stl+oca;
   const totA=ncaT+caT;
   const D=divisor;
-
+ 
   const hdr = (txt) => new TableRow({ children: [new TableCell({ children: [new Paragraph({ children:[new TextRun({text:txt,bold:true,size:20,color:'ffffff'})], shading:{type:ShadingType.SOLID,color:'1e293b',fill:'1e293b'} })], columnSpan:3 })], tableHeader: true });
   const subhdr = (txt) => new TableRow({ children: [new TableCell({ children: [new Paragraph({ children:[new TextRun({text:txt,bold:true,size:18,color:'475569'})], shading:{type:ShadingType.SOLID,color:'f1f5f9',fill:'f1f5f9'} })], columnSpan:3 })] });
-
+ 
   return [
     sectionTitle(method === 'IFRS' || method === 'IFRS_SME' ? 'Statement of Financial Position' : 'Balance Sheet'),
     new Paragraph({ children:[new TextRun({text:'as at 31st March',size:20,color:'64748b'})], alignment:AlignmentType.CENTER, spacing:{after:160} }),
@@ -229,7 +239,7 @@ function buildBS(fsLines, divisor, method) {
     pageBreak(),
   ];
 }
-
+ 
 // ── P&L in Word ───────────────────────────────────────────────────────────────
 function buildPL(plLines, divisor, method) {
   const lines = plLines || [];
@@ -239,7 +249,7 @@ function buildPL(plLines, divisor, method) {
   const rev=g(['revenue from operations','revenue from contracts','turnover']), oi=g(['other income']), totRev=rev+oi;
   const mat=g(['cost of materials','material cost','purchases of stock','cost of sales','cost of goods']), emp=g(['employee','salary','wages']), fin=g(['finance cost','interest expense']), dep=g(['depreciation','amortisation','amortization']), oe=g(['other expenses']), totExp=mat+emp+fin+dep+oe;
   const ebit=totRev-totExp, exc=g(['exceptional']), pbt=ebit-exc, tax=g(['tax expense','tax expense:']), pat=pbt-tax;
-
+ 
   return [
     sectionTitle(method==='IFRS'||method==='IFRS_SME'?'Statement of Comprehensive Income':'Statement of Profit and Loss'),
     new Paragraph({children:[new TextRun({text:'for the year ended 31st March',size:20,color:'64748b'})],alignment:AlignmentType.CENTER,spacing:{after:160}}),
@@ -275,60 +285,58 @@ function buildPL(plLines, divisor, method) {
     pageBreak(),
   ];
 }
-
+ 
 // ── Notes in Word ─────────────────────────────────────────────────────────────
 function buildNotes(noteGroups, divisor) {
   const D = divisor;
   const sections = [sectionTitle('Notes to Financial Statements')];
-
+ 
   for (const note of noteGroups) {
+    // Skip notes where total is zero
+    if (Math.abs(Number(note.total)) < 0.005) continue;
+ 
     sections.push(new Paragraph({
       children: [new TextRun({ text: `Note ${note.noteNumber} — ${note.title}`, bold: true, size: 24, color: '4f46e5' })],
       spacing: { before: 200, after: 100 },
     }));
-
+ 
     const rows = [
       new TableRow({ tableHeader: true, children: [
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Particulars', bold: true, size: 20, color: 'ffffff' })], shading: { type: ShadingType.SOLID, color: '334155', fill: '334155' } })], width: { size: 75, type: WidthType.PERCENTAGE } }),
         new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Amount', bold: true, size: 20, color: 'ffffff' })], alignment: AlignmentType.RIGHT, shading: { type: ShadingType.SOLID, color: '334155', fill: '334155' } })], width: { size: 25, type: WidthType.PERCENTAGE } }),
       ]}),
     ];
-
+ 
+    // Export: show ONLY group heading (subGroupName) + subtotal — NO ledger rows
     if (note.subGroups && note.subGroups.length > 0) {
       for (const sg of note.subGroups) {
-        if (note.subGroups.length > 1) {
+        // Skip zero subtotal subgroups
+        if (Math.abs(Number(sg.subtotal)) < 0.005) continue;
+ 
+        if (note.subGroups.filter(s => Math.abs(Number(s.subtotal)) >= 0.005).length > 1) {
+          // Show subgroup heading + subtotal as a row
           rows.push(new TableRow({ children: [
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: sg.subGroupName, italics: true, size: 18, color: '475569' })], shading: { type: ShadingType.SOLID, color: 'f8fafc', fill: 'f8fafc' } })], columnSpan: 2 }),
-          ]}));
-        }
-        for (const row of (sg.rows || [])) {
-          rows.push(new TableRow({ children: [
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: '  ' + (row.accountName || row.accountNumber), size: 18 })] })], width: { size: 75, type: WidthType.PERCENTAGE } }),
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: fmtNum(row.finalNet, D), size: 18 })], alignment: AlignmentType.RIGHT })], width: { size: 25, type: WidthType.PERCENTAGE } }),
-          ]}));
-        }
-        if (note.subGroups.length > 1) {
-          rows.push(new TableRow({ children: [
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Sub-total', bold: true, size: 18 })] })], width: { size: 75, type: WidthType.PERCENTAGE } }),
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: fmtNum(sg.subtotal, D), bold: true, size: 18 })], alignment: AlignmentType.RIGHT })], width: { size: 25, type: WidthType.PERCENTAGE } }),
+            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: sg.subGroupName, size: 18 })] })], width: { size: 75, type: WidthType.PERCENTAGE } }),
+            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: fmtNum(sg.subtotal, D, true), size: 18 })], alignment: AlignmentType.RIGHT })], width: { size: 25, type: WidthType.PERCENTAGE } }),
           ]}));
         }
       }
     }
-
+ 
+    // Total row — always show
     rows.push(new TableRow({ children: [
       new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: `Total — ${note.title}`, bold: true, size: 20 })], shading: { type: ShadingType.SOLID, color: 'e0e7ff', fill: 'e0e7ff' } })], width: { size: 75, type: WidthType.PERCENTAGE } }),
-      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: fmtNum(note.total, D), bold: true, size: 20 })], alignment: AlignmentType.RIGHT, shading: { type: ShadingType.SOLID, color: 'e0e7ff', fill: 'e0e7ff' } })], width: { size: 25, type: WidthType.PERCENTAGE } }),
+      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: fmtNum(note.total, D, true), bold: true, size: 20 })], alignment: AlignmentType.RIGHT, shading: { type: ShadingType.SOLID, color: 'e0e7ff', fill: 'e0e7ff' } })], width: { size: 25, type: WidthType.PERCENTAGE } }),
     ]}));
-
+ 
     sections.push(new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } }));
     sections.push(new Paragraph({ text: '', spacing: { after: 160 } }));
   }
-
+ 
   sections.push(pageBreak());
   return sections;
 }
-
+ 
 // ── MAIN EXPORT FUNCTION ──────────────────────────────────────────────────────
 async function exportWord(engagementId, firmId) {
   // Raw SQL - avoids broken Prisma relation after db pull
@@ -347,7 +355,7 @@ async function exportWord(engagementId, firmId) {
               gstin: engRow.gstin, tradeLicense: engRow.tradeLicense,
               vatNumber: engRow.vatNumber, region: engRow.clientRegion },
   };
-
+ 
   const [sections, _rawWordFsLines, noteGroups] = await Promise.all([
     prisma.reportSection.findMany({
       where: { engagementId },
@@ -365,19 +373,19 @@ async function exportWord(engagementId, firmId) {
       },
     }),
   ]);
-
+ 
   // Join FSLines with NoteGroups (no Prisma relation after db pull)
   const _ngByGroupId = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
   const fsLines = _rawWordFsLines.map(l => ({
     ...l,
     noteGroup: l.noteGroupId ? _ngByGroupId.get(l.noteGroupId) || null : null,
   }));
-
+ 
   const D = 1; // Actual amounts in Word export
-
+ 
   const bsLines  = fsLines.filter(l => l.sheet === 'BS' && !l.groupName?.startsWith('__'));
   const plLines  = fsLines.filter(l => l.sheet === 'PL' && !l.groupName?.startsWith('__'));
-
+ 
   // Structure notes
   const structuredNotes = noteGroups
     .filter(ng => !ng.noteGroupId?.startsWith('__') && !ng.title?.startsWith('__'))
@@ -387,59 +395,59 @@ async function exportWord(engagementId, firmId) {
       total: ng.noteDetails.reduce((s,d)=>s+Number(d.finalNet),0),
       subGroups: collapseNotes(ng.noteDetails),
     }));
-
+ 
   // Get section content map
   const sectionMap = {};
   for (const s of sections) { sectionMap[s.sectionType] = s; }
-
+ 
   // Build document children in order
   const children = [];
   const visibleSections = sections.filter(s => s.isVisible).sort((a,b)=>a.displayOrder-b.displayOrder);
-
+ 
   for (const section of visibleSections) {
     switch (section.sectionType) {
       case 'FIRST_PAGE':
         children.push(...buildFrontPage(engagement, section.content));
         break;
-
+ 
       case 'TABLE_OF_CONTENTS':
         children.push(...buildTOC(visibleSections));
         break;
-
+ 
       case 'DIRECTOR_REPORT':
         children.push(sectionTitle(section.title));
         children.push(...htmlToParagraphs(section.content));
         children.push(pageBreak());
         break;
-
+ 
       case 'AUDITOR_REPORT':
         children.push(sectionTitle(section.title));
         children.push(...htmlToParagraphs(section.content));
         children.push(pageBreak());
         break;
-
+ 
       case 'FINANCIAL_STATEMENTS':
         children.push(sectionTitle('Financial Statements'));
         children.push(...buildBS(bsLines, D, engagement.method));
         children.push(...buildPL(plLines, D, engagement.method));
         break;
-
+ 
       case 'ACCOUNTING_POLICY':
         children.push(sectionTitle(section.title));
         children.push(...htmlToParagraphs(section.content));
         children.push(pageBreak());
         break;
-
+ 
       case 'SUGGESTIONS':
         children.push(sectionTitle(section.title));
         children.push(...htmlToParagraphs(section.content));
         children.push(pageBreak());
         break;
-
+ 
       case 'NOTES':
         children.push(...buildNotes(structuredNotes, D));
         break;
-
+ 
       case 'THANK_YOU':
         children.push(new Paragraph({ text: '', spacing: { after: 1200 } }));
         children.push(new Paragraph({
@@ -454,7 +462,7 @@ async function exportWord(engagementId, firmId) {
         break;
     }
   }
-
+ 
   const doc = new Document({
     creator:  'FinStatement SaaS',
     title:    `${engagement.client?.name} — Annual Report ${engagement.financialYear}`,
@@ -479,10 +487,10 @@ async function exportWord(engagementId, firmId) {
       children,
     }],
   });
-
+ 
   return Packer.toBuffer(doc);
 }
-
+ 
 function collapseNotes(details) {
   const groups = new Map();
   for (const d of details) {
@@ -494,13 +502,13 @@ function collapseNotes(details) {
   }
   return [...groups.values()];
 }
-
+ 
 // ── Excel export ──────────────────────────────────────────────────────────────
 async function exportExcel(engagementId, firmId) {
   const ExcelJS = require('exceljs');
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FinStatement SaaS';
-
+ 
   const engRows2 = await prisma.$queryRawUnsafe(
     `SELECT e.*, c.name as "clientName", c.cin, c.pan, c.gstin,
             c."tradeLicense", c."vatNumber", c.region as "clientRegion"
@@ -517,7 +525,7 @@ async function exportExcel(engagementId, firmId) {
               vatNumber: engRow2.vatNumber, region: engRow2.clientRegion },
   };
   if (!engagement) throw Object.assign(new Error('Not found'), { status: 404 });
-
+ 
   const rawLines = await prisma.fSLine.findMany({
     where: { engagementId },
     orderBy: { displayOrder: 'asc' },
@@ -528,14 +536,14 @@ async function exportExcel(engagementId, firmId) {
     ...l,
     noteGroup: l.noteGroupId ? ngMapForJoin.get(l.noteGroupId) || null : null,
   }));
-
+ 
   const bsLines = fsLines.filter(l => l.sheet === 'BS');
   const plLines = fsLines.filter(l => l.sheet === 'PL');
-
+ 
   const style = { font: { name: 'Calibri', size: 11 } };
   const bold  = { font: { name: 'Calibri', size: 11, bold: true } };
   const hdrStyle = { font: { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } }, alignment: { horizontal: 'center' } };
-
+ 
   // ── BS Sheet ──
   const bsSheet = wb.addWorksheet('Balance Sheet');
   bsSheet.columns = [{ width: 50 }, { width: 10 }, { width: 20 }];
@@ -545,16 +553,16 @@ async function exportExcel(engagementId, firmId) {
     if (amount !== undefined && amount !== '') { row.getCell(3).numFmt = '#,##0.00'; row.getCell(3).alignment = { horizontal: 'right' }; }
     row.getCell(2).alignment = { horizontal: 'center' };
   };
-
+ 
   bsSheet.addRow(['Balance Sheet', '', '']).font = { bold: true, size: 14, name: 'Calibri' };
   bsSheet.addRow(['as at 31st March', '', '']);
   bsSheet.addRow([]);
   ['Particulars','Note','Amount (₹)'].forEach((h,i) => { const c = bsSheet.getRow(4).getCell(i+1); c.value = h; Object.assign(c, hdrStyle); });
-
+ 
   for (const line of bsLines) {
     addBSRow(line.groupName, line.noteGroup?.noteNumber, Number(line.totalFinalNet), false);
   }
-
+ 
   // ── P&L Sheet ──
   const plSheet = wb.addWorksheet('Profit and Loss');
   plSheet.columns = [{ width: 50 }, { width: 10 }, { width: 20 }];
@@ -564,7 +572,7 @@ async function exportExcel(engagementId, firmId) {
     row.getCell(3).numFmt = '#,##0.00';
     row.getCell(3).alignment = { horizontal: 'right' };
   }
-
+ 
   // ── Notes Sheet ──
   const notesSheet = wb.addWorksheet('Notes');
   const noteGroups = await prisma.noteGroup.findMany({
@@ -594,10 +602,10 @@ async function exportExcel(engagementId, firmId) {
     totRow.font = { bold: true, name: 'Calibri', size: 11 };
     notesRow++;
   }
-
+ 
   return wb.xlsx.writeBuffer();
 }
-
+ 
 // ── PDF Export — generates HTML then sends to frontend for print ──────────────
 async function exportPDFData(engagementId, firmId) {
   const engRows = await prisma.$queryRawUnsafe(
@@ -617,5 +625,5 @@ async function exportPDFData(engagementId, firmId) {
     fsLines, noteGroups, noteDetails,
   };
 }
-
+ 
 module.exports = { exportWord, exportExcel, exportPDFData };

@@ -759,8 +759,11 @@ export default function Schedules() {
   const { engagementId } = useParams();
   const { currentEngagement, currentClient, firm } = useStore();
   const method   = currentEngagement?.method || 'AS';
-  const region   = currentClient?.region || currentClient?.country === 'UAE' ? 'UAE' : (firm?.region || 'India');
-  const currency = region === 'UAE' || method === 'IFRS' || method === 'IFRS_SME' ? 'AED' : 'INR';
+  // Method is always authoritative for currency
+  const currency = (method === 'IFRS' || method === 'IFRS_SME') ? 'AED'
+    : (method === 'AS' || method === 'IND_AS') ? 'INR'
+    : (currentClient?.region === 'UAE' || firm?.region === 'UAE') ? 'AED'
+    : 'INR';
   const [activeTab, setActiveTab] = useState('ppe');
 
   return (

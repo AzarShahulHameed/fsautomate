@@ -50,7 +50,7 @@ function Row({ label, note, amount, bold, indent, section, subheader, borderTop,
 }
 
 // ── Balance Sheet ─────────────────────────────────────────────────────────────
-function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol }) {
+function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, unitLabel }) {
   const cfg    = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
   const D      = divisor;
   const isIFRS = method === 'IFRS' || method === 'IFRS_SME';
@@ -340,7 +340,7 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol }) {
         <h2 className="text-lg font-bold uppercase tracking-wide">{cfg.bsTitle}</h2>
         <p className="text-sm text-slate-500">as at 31st March</p>
         <p className="text-xs text-slate-400 mt-0.5">
-          {currSymbol === 'INR' ? 'All amounts in ₹' : `All amounts in ${currSymbol}`}
+          {unitLabel}
         </p>
         <p className="text-xs text-slate-400">{cfg.standard}</p>
       </div>
@@ -374,7 +374,7 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol }) {
 }
 
 // ── Profit & Loss ─────────────────────────────────────────────────────────────
-function PLStatement({ lines, method, divisor, currSymbol }) {
+function PLStatement({ lines, method, divisor, currSymbol, unitLabel }) {
   const cfg    = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
   const D      = divisor;
   const isIFRS = method === 'IFRS' || method === 'IFRS_SME';
@@ -447,7 +447,7 @@ function PLStatement({ lines, method, divisor, currSymbol }) {
         <h2 className="text-lg font-bold uppercase tracking-wide">{cfg.plTitle}</h2>
         <p className="text-sm text-slate-500">for the year ended 31st March</p>
         <p className="text-xs text-slate-400 mt-0.5">
-          {currSymbol === 'INR' ? 'All amounts in ₹' : `All amounts in ${currSymbol}`}
+          {unitLabel}
         </p>
         <p className="text-xs text-slate-400">{cfg.standard}</p>
       </div>
@@ -757,16 +757,22 @@ export default function FinancialStatements() {
   const [fsErrors, setFsErrors]     = useState([]);
 
   const method      = currentEngagement?.method || 'AS';
-  // Currency: method is authoritative — IFRS/IFRS_SME=AED, AS/IND_AS=INR
-  const currency = (method === 'IFRS' || method === 'IFRS_SME')
-    ? 'AED'
-    : (method === 'AS' || method === 'IND_AS')
-    ? 'INR'
-    : (currentClient?.region === 'UAE' || currentClient?.country === 'UAE')
-    ? 'AED'
+  // Method is always authoritative for currency
+  const currency = (method === 'IFRS' || method === 'IFRS_SME') ? 'AED'
+    : (method === 'AS' || method === 'IND_AS') ? 'INR'
+    : (currentClient?.region === 'UAE' || firm?.region === 'UAE') ? 'AED'
     : 'INR';
   const currSymbol  = currency;
   const cfg         = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
+  // Dynamic amount header — updates when unit changes
+  const unitSuffix  = unit.value === 1 ? '' : ` in ${unit.label}`;
+  const unitLabel   = currency === 'INR'
+    ? `All amounts in ₹${unitSuffix}`
+    : `All amounts in ${currency}${unitSuffix}`;
+  // Financial closing date from engagement
+  const closingDate = currentEngagement?.financialYear
+    ? `As at 31 March ${currentEngagement.financialYear.split('-')[1] || currentEngagement.financialYear}`
+    : '';
 
   useEffect(() => { load(); }, [engagementId]);
 
@@ -812,7 +818,7 @@ export default function FinancialStatements() {
       <div className="flex items-center justify-between mb-5 flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-800">Financial Statements</h1>
-          <p className="text-slate-500 text-sm mt-0.5">{method} · {currentEngagement?.financialYear} · {currency}</p>
+          <p className="text-slate-500 text-sm mt-0.5">{method} · {currentEngagement?.financialYear} · {closingDate && `Closing: ${closingDate}`}</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
           {hiddenCount > 0 && (
@@ -863,8 +869,8 @@ export default function FinancialStatements() {
         </div>
       ) : (
         <>
-          {tab==='BS'   && <BSStatement   lines={allLines.filter(l=>l.sheet==='BS')} method={method} hidden={hidden} onHide={toggleHide} divisor={unit.value} currSymbol={currSymbol} />}
-          {tab==='PL'   && <PLStatement   lines={allLines} method={method} divisor={unit.value} currSymbol={currSymbol} />}
+          {tab==='BS'   && <BSStatement   lines={allLines.filter(l=>l.sheet==='BS')} method={method} hidden={hidden} onHide={toggleHide} divisor={unit.value} currSymbol={currSymbol} unitLabel={unitLabel} />}
+          {tab==='PL'   && <PLStatement   lines={allLines} method={method} divisor={unit.value} currSymbol={currSymbol} unitLabel={unitLabel} />}
           {tab==='CFS'  && <CFSStatement  bsLines={allLines.filter(l=>l.sheet==='BS')} plLines={allLines} method={method} cfsMethod={cfsMethod} onMethodChange={setCfsMethod} divisor={unit.value} currSymbol={currSymbol} />}
           {tab==='OCI'  && <OCIStatement  lines={allLines} divisor={unit.value} currSymbol={currSymbol} />}
           {tab==='SOCE' && <SOCEStatement bsLines={allLines.filter(l=>l.sheet==='BS')} plLines={allLines} divisor={unit.value} currSymbol={currSymbol} />}
