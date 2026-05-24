@@ -528,3 +528,32 @@ model Contingency {
 
   @@index([engagementId])
 }
+
+model UserPreferences {
+  id             String   @id @default(uuid())
+  userId         String   @unique
+  user           User     @relation(fields: [userId], references: [id])
+  theme          String   @default("light")
+  dateFormat     String   @default("DD/MM/YYYY")
+  numberFormat   String   @default("en-IN")
+  compactMode    Boolean  @default(false)
+  emailReports   Boolean  @default(true)
+  engagementUpdates Boolean @default(true)
+  validationAlerts  Boolean @default(true)
+  systemUpdates  Boolean  @default(false)
+  marketing      Boolean  @default(false)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model OTPVerification {
+  id        String   @id @default(uuid())
+  userId    String
+  type      String   // 'email' | 'phone'
+  target    String   // the email or phone being verified
+  otp       String   // 6-digit code
+  expiresAt DateTime
+  verified  Boolean  @default(false)
+  attempts  Int      @default(0)
+  createdAt DateTime @default(now())
+}

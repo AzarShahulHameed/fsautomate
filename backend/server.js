@@ -21,6 +21,8 @@ const reportRoutes        = require('./src/routes/report.routes');
 const exportRoutes        = require('./src/routes/export.routes');
 const schedulesRoutes     = require('./src/routes/schedules.routes');
 const uploadRoutes        = require('./src/routes/upload.routes');
+const preferencesRoutes   = require('./src/routes/preferences.routes');
+const otpRoutes           = require('./src/routes/otp.routes');
 const oauthRoutes         = require('./src/routes/oauth.routes');
 
 const app  = express();
@@ -122,6 +124,8 @@ app.use('/api/report',      reportRoutes);
 app.use('/api/export',      exportRoutes);
 app.use('/api/schedules',   schedulesRoutes);
 app.use('/api/upload',      uploadRoutes);
+app.use('/api/preferences', preferencesRoutes);
+app.use('/api/otp',         otpRoutes);
 app.use('/api/auth',        oauthRoutes);
 
 // ─── 404 ───────────────────────────────────────────────────────────────────
