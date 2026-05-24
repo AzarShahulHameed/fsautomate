@@ -424,8 +424,8 @@ async function generateFS(engagementId, firmId) {
     const noteNumber = noteNumberMap.get(agg.noteGroupId) || autoNum++;
     const ngId = uuid();
     await prisma.$executeRawUnsafe(
-      `INSERT INTO "NoteGroup" (id,"engagementId","noteGroupId","noteNumber",title,"isMandatory","createdAt","updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,NOW(),NOW())
+      `INSERT INTO "NoteGroup" (id,"engagementId","noteGroupId","noteNumber",title,"isMandatory","createdAt")
+       VALUES ($1,$2,$3,$4,$5,$6,NOW())
        ON CONFLICT DO NOTHING`,
       ngId, engagementId, agg.noteGroupId, noteNumber, agg.groupName, false
     );
@@ -439,8 +439,8 @@ async function generateFS(engagementId, firmId) {
   for (const [, agg] of aggregates) {
     const lineId = uuid();
     await prisma.$executeRawUnsafe(
-      `INSERT INTO "FSLine" (id,"engagementId","tbVersionId",sheet,"groupName","totalFinalNet","noteGroupId","displayOrder","assetLiability","createdAt","updatedAt")
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW(),NOW())`,
+      `INSERT INTO "FSLine" (id,"engagementId","tbVersionId",sheet,"groupName","totalFinalNet","noteGroupId","displayOrder","assetLiability","generatedAt")
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::"AssetLiability",NOW())`,
       lineId, engagementId, latest.id,
       agg.sheet, agg.groupName, agg.totalFinalNet,
       agg.noteGroupId || null, ++order, agg.assetLiability
@@ -463,8 +463,8 @@ async function generateFS(engagementId, firmId) {
       if (!agg.noteGroupId) continue;
       for (const tbr of agg.rows) {
         await prisma.$executeRawUnsafe(
-          `INSERT INTO "NoteDetail" (id,"engagementId","noteGroupId","subGroupName","accountNumber","accountName","finalNet","displayOrder","createdAt","updatedAt")
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW(),NOW())`,
+          `INSERT INTO "NoteDetail" (id,"engagementId","noteGroupId","subGroupName","accountNumber","accountName","finalNet","displayOrder","createdAt")
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,NOW())`,
           uuid(), engagementId, agg.noteGroupId,
           tbr.subGrouping || '', tbr.accountNumber || '', tbr.accountName || '',
           displaySign(Number(tbr.finalNet || 0), agg.assetLiability), 0
