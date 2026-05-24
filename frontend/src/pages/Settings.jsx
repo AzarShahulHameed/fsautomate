@@ -2,11 +2,11 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store';
 import { authAPI, uploadAPI, prefsAPI, otpAPI } from '../api/client';
 import toast from 'react-hot-toast';
-
+ 
 // ── Reusable UI ───────────────────────────────────────────────────────────────
 const INPUT = "w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all";
 const INPUT_DISABLED = "w-full px-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm text-slate-500 cursor-not-allowed";
-
+ 
 function Card({ title, subtitle, children, badge }) {
   return (
     <div className="bg-white rounded-2xl border border-slate-200 shadow-sm overflow-hidden">
@@ -21,7 +21,7 @@ function Card({ title, subtitle, children, badge }) {
     </div>
   );
 }
-
+ 
 function Field({ label, required, hint, error, children }) {
   return (
     <div>
@@ -34,7 +34,7 @@ function Field({ label, required, hint, error, children }) {
     </div>
   );
 }
-
+ 
 function Toggle({ value, onChange, label, desc }) {
   return (
     <div className="flex items-center justify-between py-3">
@@ -49,7 +49,7 @@ function Toggle({ value, onChange, label, desc }) {
     </div>
   );
 }
-
+ 
 function Avatar({ user, size = 'xl' }) {
   const sz = size === 'xl' ? 'w-20 h-20 text-2xl' : 'w-10 h-10 text-sm';
   if (user?.avatar) return (
@@ -62,7 +62,7 @@ function Avatar({ user, size = 'xl' }) {
     </div>
   );
 }
-
+ 
 const TABS = [
   { key:'profile',       icon:'👤', label:'Profile'           },
   { key:'firm',          icon:'🏢', label:'Firm & Branding'   },
@@ -74,17 +74,17 @@ const TABS = [
   { key:'data',          icon:'📦', label:'Data & Export'     },
   { key:'support',       icon:'💬', label:'Help & Support'    },
 ];
-
+ 
 export default function Settings() {
   const { user, firm, updateUser, updateFirm, currentEngagement } = useStore();
   const fileRef   = useRef();
   const method    = currentEngagement?.method || 'AS';
   const currency  = (method === 'IFRS' || method === 'IFRS_SME') ? 'AED' : 'INR';
-
+ 
   const [activeTab, setActiveTab] = useState('profile');
   const [uploading, setUploading] = useState(false);
   const [saving,    setSaving]    = useState(false);
-
+ 
   // OTP state
   const [otpState, setOtpState] = useState({
     emailSending: false, emailSent: false, emailOTP: '', emailVerifying: false,
@@ -92,7 +92,7 @@ export default function Settings() {
   });
   const [pendingEmail, setPendingEmail] = useState('');
   const [pendingPhone, setPendingPhone] = useState('');
-
+ 
   const [profile, setProfile] = useState({
     name: user?.name||'', email: user?.email||'',
     phone: user?.phone||'', designation: user?.designation||'', avatar: user?.avatar||'',
@@ -109,13 +109,13 @@ export default function Settings() {
     theme: 'light', dateFormat: 'DD/MM/YYYY', numberFormat: 'en-IN',
     compactMode: false,
   });
-
+ 
   useEffect(() => {
     setProfile({ name:user?.name||'', email:user?.email||'', phone:user?.phone||'', designation:user?.designation||'', avatar:user?.avatar||'' });
     setPendingEmail(user?.email||'');
     setPendingPhone(user?.phone||'');
   }, [user?.id]);
-
+ 
   // Load preferences from DB
   useEffect(() => {
     prefsAPI.get().then(data => {
@@ -136,11 +136,11 @@ export default function Settings() {
       }
     }).catch(() => {});
   }, [user?.id]);
-
+ 
   useEffect(() => {
     setFirmData({ name:firm?.name||'', region:firm?.region||'India' });
   }, [firm?.id, firm?.name, firm?.region]);
-
+ 
   async function handleAvatar(e) {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -160,7 +160,7 @@ export default function Settings() {
     } catch { toast.error('Upload failed'); }
     finally { setUploading(false); }
   }
-
+ 
   async function saveProfile() {
     if (!profile.name.trim()) { toast.error('Name is required'); return; }
     // Save name, designation only (email & phone need OTP)
@@ -181,7 +181,7 @@ export default function Settings() {
     } catch (err) { toast.error(err?.error||'Save failed'); }
     finally { setSaving(false); }
   }
-
+ 
   async function sendEmailOTP() {
     const email = pendingEmail.trim().toLowerCase();
     if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) { toast.error('Enter a valid email'); return; }
@@ -198,7 +198,7 @@ export default function Settings() {
       toast.error(err?.error || 'Failed to send OTP');
     }
   }
-
+ 
   async function verifyEmailOTP() {
     setOtpState(s => ({ ...s, emailVerifying: true }));
     try {
@@ -213,7 +213,7 @@ export default function Settings() {
       toast.error(err?.error || 'Wrong OTP');
     }
   }
-
+ 
   async function sendPhoneOTP() {
     const phone = pendingPhone.trim();
     if (!phone) { toast.error('Enter a phone number'); return; }
@@ -229,7 +229,7 @@ export default function Settings() {
       toast.error(err?.error || 'Failed to send OTP');
     }
   }
-
+ 
   async function verifyPhoneOTP() {
     setOtpState(s => ({ ...s, phoneVerifying: true }));
     try {
@@ -244,7 +244,7 @@ export default function Settings() {
       toast.error(err?.error || 'Wrong OTP');
     }
   }
-
+ 
   async function saveFirm() {
     if (!firmData.name.trim()) { toast.error('Firm name required'); return; }
     setSaving(true);
@@ -255,7 +255,7 @@ export default function Settings() {
     } catch (err) { toast.error(err?.error||'Save failed'); }
     finally { setSaving(false); }
   }
-
+ 
   async function changePassword() {
     if (!password.current||!password.newPass) { toast.error('All password fields required'); return; }
     if (password.newPass !== password.confirm) { toast.error('Passwords do not match'); return; }
@@ -268,7 +268,7 @@ export default function Settings() {
     } catch (err) { toast.error(err?.error||'Incorrect current password'); }
     finally { setSaving(false); }
   }
-
+ 
   const passStrength = !password.newPass ? 0
     : password.newPass.length < 6 ? 1
     : password.newPass.length < 8 ? 2
@@ -276,7 +276,7 @@ export default function Settings() {
     : /[A-Z]/.test(password.newPass) && /[0-9]/.test(password.newPass) ? 3 : 2;
   const strengthColor = ['','bg-red-400','bg-amber-400','bg-yellow-400','bg-emerald-500'];
   const strengthText  = ['','Weak','Fair','Good','Strong'];
-
+ 
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Page header */}
@@ -284,9 +284,9 @@ export default function Settings() {
         <h1 className="text-xl font-bold text-slate-900">Settings</h1>
         <p className="text-sm text-slate-500 mt-0.5">Manage your account, firm preferences, and integrations</p>
       </div>
-
+ 
       <div className="flex gap-0 min-h-[calc(100vh-73px)]">
-
+ 
         {/* ── Left nav ─────────────────────────────────────────── */}
         <div className="w-56 flex-shrink-0 bg-white border-r border-slate-200 py-4">
           {TABS.map(t => (
@@ -301,11 +301,11 @@ export default function Settings() {
             </button>
           ))}
         </div>
-
+ 
         {/* ── Content ──────────────────────────────────────────── */}
         <div className="flex-1 p-8 overflow-y-auto">
           <div className="max-w-2xl space-y-5">
-
+ 
             {/* ── PROFILE ── */}
             {activeTab === 'profile' && (<>
               <Card title="Profile Photo" subtitle="Shown in sidebar, dashboard, and exported reports">
@@ -339,7 +339,7 @@ export default function Settings() {
                   </div>
                 </div>
               </Card>
-
+ 
               <Card title="Personal Information" subtitle="Your name and contact details">
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Full Name" required>
@@ -410,7 +410,7 @@ export default function Settings() {
                   </button>
                 </div>
               </Card>
-
+ 
               <Card title="Account Information" subtitle="Read-only account metadata">
                 <div className="space-y-3">
                   {[
@@ -427,7 +427,7 @@ export default function Settings() {
                 </div>
               </Card>
             </>)}
-
+ 
             {/* ── FIRM & BRANDING ── */}
             {activeTab === 'firm' && (<>
               <Card title="Firm Details" subtitle="Appears on all financial statement headers and reports">
@@ -449,7 +449,7 @@ export default function Settings() {
                     </div>
                   </Field>
                 </div>
-
+ 
                 <div className="mt-5 p-4 bg-slate-50 rounded-xl border border-slate-200">
                   <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3">Derived Settings</p>
                   <div className="grid grid-cols-3 gap-3">
@@ -465,7 +465,7 @@ export default function Settings() {
                     ))}
                   </div>
                 </div>
-
+ 
                 <div className="flex justify-end mt-5">
                   <button onClick={saveFirm} disabled={saving}
                     className="px-6 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 shadow-sm">
@@ -473,7 +473,7 @@ export default function Settings() {
                   </button>
                 </div>
               </Card>
-
+ 
               <Card title="Report Branding" badge="Coming Soon" subtitle="Customise how your firm appears on exported documents">
                 <div className="grid grid-cols-2 gap-4 opacity-50 pointer-events-none">
                   <Field label="Firm Logo"><div className="h-10 bg-slate-100 rounded-xl" /></Field>
@@ -484,7 +484,7 @@ export default function Settings() {
                 <p className="text-xs text-slate-400 mt-4 text-center">Available in Professional plan</p>
               </Card>
             </>)}
-
+ 
             {/* ── NOTIFICATIONS ── */}
             {activeTab === 'notifications' && (<>
               <Card title="Email Notifications" subtitle="Control which emails FinStatement sends you">
@@ -515,7 +515,7 @@ export default function Settings() {
                   </button>
                 </div>
               </Card>
-
+ 
               <Card title="In-App Notifications" subtitle="Alerts shown inside FinStatement">
                 <div className="divide-y divide-slate-100">
                   <Toggle value={true} onChange={()=>{}} label="Validation errors" desc="Show toast when a validation check fails" />
@@ -524,7 +524,7 @@ export default function Settings() {
                 </div>
               </Card>
             </>)}
-
+ 
             {/* ── SECURITY ── */}
             {activeTab === 'security' && (<>
               <Card title="Change Password" subtitle="Use a strong, unique password for your account">
@@ -565,7 +565,7 @@ export default function Settings() {
                   </button>
                 </div>
               </Card>
-
+ 
               <Card title="Active Sessions" subtitle="Devices and browsers currently logged in">
                 <div className="space-y-3">
                   <div className="flex items-center justify-between p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
@@ -584,7 +584,7 @@ export default function Settings() {
                   Sign out all other sessions →
                 </button>
               </Card>
-
+ 
               <Card title="Two-Factor Authentication" badge="Coming Soon" subtitle="Add an extra layer of security">
                 <div className="flex items-center gap-4 p-4 bg-slate-50 rounded-xl border border-slate-200 opacity-60">
                   <div className="w-12 h-12 rounded-xl bg-white border border-slate-200 flex items-center justify-center text-2xl">🔐</div>
@@ -594,13 +594,13 @@ export default function Settings() {
                   </div>
                 </div>
               </Card>
-
+ 
               <Card title="Danger Zone" subtitle="Permanent actions — cannot be undone">
                 <div className="space-y-3">
                   <div className="p-4 border border-red-200 rounded-xl bg-red-50">
                     <p className="text-sm font-bold text-red-800 mb-1">Delete Account</p>
                     <p className="text-xs text-red-600 mb-3">All your clients, engagements, and financial statements will be permanently deleted.</p>
-                    <button onClick={()=>toast.error('Contact support@finstatement.com to request account deletion')}
+                    <button onClick={()=>toast.error('Contact azarudeen@cat-cons.com to request account deletion')}
                       className="px-4 py-2 bg-red-600 text-white text-xs font-semibold rounded-lg hover:bg-red-700">
                       Request Account Deletion
                     </button>
@@ -608,7 +608,7 @@ export default function Settings() {
                 </div>
               </Card>
             </>)}
-
+ 
             {/* ── APPEARANCE ── */}
             {activeTab === 'appearance' && (<>
               <Card title="Theme" subtitle="Choose how FinStatement looks">
@@ -631,7 +631,7 @@ export default function Settings() {
                   ))}
                 </div>
               </Card>
-
+ 
               <Card title="Date & Number Format" subtitle="How dates and amounts are displayed">
                 <div className="grid grid-cols-2 gap-4">
                   <Field label="Date Format">
@@ -668,7 +668,7 @@ export default function Settings() {
                 </div>
               </Card>
             </>)}
-
+ 
             {/* ── INTEGRATIONS ── */}
             {activeTab === 'integrations' && (<>
               <Card title="Connected Accounts" subtitle="Single sign-on and third-party connections">
@@ -693,7 +693,7 @@ export default function Settings() {
                   ))}
                 </div>
               </Card>
-
+ 
               <Card title="Storage Provider" subtitle="Where uploaded files and avatars are stored">
                 <div className="space-y-3">
                   {[
@@ -716,7 +716,7 @@ export default function Settings() {
                   ))}
                 </div>
               </Card>
-
+ 
               <Card title="API Access" badge="Coming Soon" subtitle="Connect FinStatement to your own systems">
                 <div className="p-4 bg-slate-50 rounded-xl border border-slate-200 opacity-60">
                   <p className="text-sm font-semibold text-slate-800 mb-1">REST API</p>
@@ -730,7 +730,7 @@ export default function Settings() {
                 <p className="text-xs text-slate-400 mt-3 text-center">Available in Professional plan</p>
               </Card>
             </>)}
-
+ 
             {/* ── BILLING ── */}
             {activeTab === 'billing' && (<>
               <Card title="Current Plan">
@@ -759,7 +759,7 @@ export default function Settings() {
                   ))}
                 </div>
               </Card>
-
+ 
               <Card title="Compare Plans">
                 <div className="grid grid-cols-3 gap-4">
                   {[
@@ -797,7 +797,7 @@ export default function Settings() {
                   ))}
                 </div>
               </Card>
-
+ 
               <Card title="Billing History" subtitle="Your invoices and payment history">
                 <div className="text-center py-8 text-slate-400">
                   <p className="text-3xl mb-2">🧾</p>
@@ -806,7 +806,7 @@ export default function Settings() {
                 </div>
               </Card>
             </>)}
-
+ 
             {/* ── DATA & EXPORT ── */}
             {activeTab === 'data' && (<>
               <Card title="Export Your Data" subtitle="Download everything in your account">
@@ -833,7 +833,7 @@ export default function Settings() {
                   ))}
                 </div>
               </Card>
-
+ 
               <Card title="Data Retention" subtitle="Control how long your data is stored">
                 <div className="divide-y divide-slate-100">
                   <Toggle value={true} onChange={()=>{}} label="Keep TB version history" desc="Store all uploaded TB versions (default: last 5)" />
@@ -841,7 +841,7 @@ export default function Settings() {
                   <Toggle value={false} onChange={()=>{}} label="Auto-delete old sessions" desc="Remove inactive sessions after 30 days" />
                 </div>
               </Card>
-
+ 
               <Card title="Privacy" subtitle="How your data is used">
                 <div className="space-y-3 text-sm text-slate-600">
                   <div className="flex items-start gap-3 p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
@@ -861,13 +861,13 @@ export default function Settings() {
                 </div>
               </Card>
             </>)}
-
+ 
             {/* ── SUPPORT ── */}
             {activeTab === 'support' && (<>
               <Card title="Get Help" subtitle="Multiple ways to get support">
                 <div className="grid grid-cols-2 gap-3">
                   {[
-                    { icon:'📧', title:'Email Support',  desc:'support@finstatement.com\nResponse within 24 hours',   action:'Send Email',  color:'#6366f1' },
+                    { icon:'📧', title:'Email Support',  desc:'azarudeen@cat-cons.com\nResponse within 24 hours',   action:'Send Email',  color:'#6366f1' },
                     { icon:'💬', title:'Live Chat',      desc:'Chat with support team\nMon–Fri, 9am–6pm IST',         action:'Start Chat',  color:'#10b981', soon:true },
                     { icon:'📖', title:'Documentation',  desc:'Guides, tutorials, FAQs\nStep-by-step walkthroughs',    action:'View Docs',   color:'#f59e0b' },
                     { icon:'🎥', title:'Video Tutorials', desc:'Watch how-to videos\nFor all features',               action:'Watch',       color:'#ef4444', soon:true },
@@ -881,7 +881,7 @@ export default function Settings() {
                       <p className="text-xs text-slate-400 mt-0.5 whitespace-pre-line">{s.desc}</p>
                       <button
                         onClick={() => {
-                          if (s.title==='Email Support') window.location.href='mailto:support@finstatement.com';
+                          if (s.title==='Email Support') window.location.href='mailto:azarudeen@cat-cons.com';
                           else toast.success(s.soon?`${s.title} — coming soon`:`Opening ${s.title}…`);
                         }}
                         className="mt-3 text-xs font-semibold px-3 py-1.5 rounded-lg border transition-all"
@@ -892,7 +892,7 @@ export default function Settings() {
                   ))}
                 </div>
               </Card>
-
+ 
               <Card title="Frequently Asked Questions">
                 <div className="space-y-1">
                   {[
@@ -912,7 +912,7 @@ export default function Settings() {
                   ))}
                 </div>
               </Card>
-
+ 
               <Card title="System Status & Info">
                 <div className="space-y-3">
                   <div className="flex items-center justify-between p-3 bg-emerald-50 border border-emerald-200 rounded-xl">
@@ -940,7 +940,7 @@ export default function Settings() {
                   </div>
                 </div>
               </Card>
-
+ 
               <Card title="Report a Bug or Request a Feature">
                 <div className="space-y-4">
                   <div className="grid grid-cols-2 gap-3">
@@ -948,7 +948,7 @@ export default function Settings() {
                       { icon:'🐛', label:'Report a Bug',       desc:'Something not working?',    color:'#ef4444' },
                       { icon:'💡', label:'Request a Feature',  desc:'Got an idea?',              color:'#6366f1' },
                     ].map((r,i)=>(
-                      <button key={i} onClick={()=>window.location.href='mailto:support@finstatement.com?subject='+r.label}
+                      <button key={i} onClick={()=>window.location.href='mailto:azarudeen@cat-cons.com?subject='+r.label}
                         className="flex items-center gap-3 p-4 border border-slate-200 rounded-xl hover:border-slate-300 text-left transition-all">
                         <span className="text-2xl">{r.icon}</span>
                         <div>
@@ -961,10 +961,11 @@ export default function Settings() {
                 </div>
               </Card>
             </>)}
-
+ 
           </div>
         </div>
       </div>
     </div>
   );
 }
+ 
