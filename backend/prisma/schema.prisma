@@ -86,7 +86,6 @@ model User {
   sessions     UserSession[]
   auditLogs    AuditLog[]
   engagements  EngagementUser[]
-  preferences  UserPreferences?
 
   @@unique([firmId, email])
   @@index([firmId])
