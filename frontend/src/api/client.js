@@ -95,7 +95,7 @@ export const mappingAPI = {
 
 // ─── Financial Statements API ─────────────────────────────────────────────
 export const fsAPI = {
-  generate: (eid) => api.post(`/fs/${eid}/generate`),
+  generate: (eid) => api.post(`/fs/${eid}/generate`, {}, { timeout: 120000 }),
   get:      (eid) => api.get(`/fs/${eid}`),
 };
 
