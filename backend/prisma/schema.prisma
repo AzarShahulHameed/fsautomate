@@ -86,6 +86,7 @@ model User {
   sessions     UserSession[]
   auditLogs    AuditLog[]
   engagements  EngagementUser[]
+  preferences  UserPreferences?
 
   @@unique([firmId, email])
   @@index([firmId])
@@ -532,7 +533,6 @@ model Contingency {
 model UserPreferences {
   id             String   @id @default(uuid())
   userId         String   @unique
-  user           User     @relation(fields: [userId], references: [id])
   theme          String   @default("light")
   dateFormat     String   @default("DD/MM/YYYY")
   numberFormat   String   @default("en-IN")
