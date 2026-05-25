@@ -404,8 +404,14 @@ async function generateFS(engagementId, firmId) {
     return 0;
   });
 
-  const uniqueNoteGroupIds = [...new Set(sortedAggs.map(a => a.noteGroupId).filter(Boolean))];
-  const noteNumberMap      = assignNoteNumbers(method, uniqueNoteGroupIds);
+  // Only assign note numbers to aggregates with non-zero values
+  // This prevents gaps like: Note 3=PPE, Note 4=(zero item, hidden), Note 5=Trade Rec
+  const uniqueNoteGroupIds = [...new Set(
+    sortedAggs
+      .filter(a => a.noteGroupId && Math.abs(Number(a.totalFinalNet || 0)) >= 0.005)
+      .map(a => a.noteGroupId)
+  )];
+  const noteNumberMap = assignNoteNumbers(method, uniqueNoteGroupIds);
 
   // ── Persist to DB using raw SQL — no transaction timeout ─────────────────
   const { v4: uuid } = require('uuid');

@@ -1,5 +1,5 @@
 'use strict';
- 
+
 const {
   Document, Packer, Paragraph, Table, TableRow, TableCell,
   TextRun, HeadingLevel, AlignmentType, PageBreak, WidthType,
@@ -8,8 +8,8 @@ const {
   TabStopType, TabStopPosition, PageNumber,
 } = require('docx');
 const { prisma } = require('../config/db');
- 
- 
+
+
 // ── Template constants (matching the illustrative FS template exactly) ─────────
 const FONT        = 'Calibri';
 const SZ_NORMAL   = 20; // 10pt
@@ -19,7 +19,7 @@ const SZ_HEADING  = 22; // 11pt
 const COL_NOTE_BLUE = '4472C4'; // note number colour (blue like in template)
 const COL_SECTION = '1e293b';   // section header colour (dark)
 const COL_GREY    = '64748b';   // grey text
- 
+
 // ── Column widths (DXA) — exactly matching template ──────────────────────────
 // Total A4 content width with 1" margins = 9026 DXA
 // Template BS: Particulars | Notes | gap | CY Amount | gap | PY Amount
@@ -30,7 +30,7 @@ const COL_AMT1  = 1500; // Current Year
 const COL_GAPB  = 106;  // spacer
 const COL_AMT2  = 1550; // Prior Year (or comparative)
 const TOTAL_W   = COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2; // 8826
- 
+
 // ── Number formatter ──────────────────────────────────────────────────────────
 function fmtNum(n, divisor = 1, hideZero = false) {
   const num = Number(n || 0) / divisor;
@@ -40,21 +40,21 @@ function fmtNum(n, divisor = 1, hideZero = false) {
   const s = abs.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   return num < 0 ? `(${s})` : s;
 }
- 
+
 function stripHtml(html) {
   if (!html) return '';
   return html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n')
     .replace(/<\/li>/gi, '\n').replace(/<[^>]+>/g, '').trim();
 }
- 
+
 // ── No border (invisible cell border) ────────────────────────────────────────
 const NO_BORDER = { style: BorderStyle.NIL, size: 0, color: 'FFFFFF' };
 const NO_BORDERS = { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER };
- 
+
 // ── Cell border helpers ───────────────────────────────────────────────────────
 const SINGLE = { style: BorderStyle.SINGLE, size: 4, color: 'auto' };
 const DOUBLE = { style: BorderStyle.DOUBLE, size: 4, color: 'auto' };
- 
+
 function cellBorders(opts = {}) {
   return {
     top:    opts.top    ? SINGLE : NO_BORDER,
@@ -63,7 +63,7 @@ function cellBorders(opts = {}) {
     right:  NO_BORDER,
   };
 }
- 
+
 // ── Text run helper ───────────────────────────────────────────────────────────
 function run(text, opts = {}) {
   return new TextRun({
@@ -75,7 +75,7 @@ function run(text, opts = {}) {
     color: opts.color || undefined,
   });
 }
- 
+
 // ── Paragraph helper ─────────────────────────────────────────────────────────
 function para(children, opts = {}) {
   return new Paragraph({
@@ -85,7 +85,7 @@ function para(children, opts = {}) {
     indent: opts.indent ? { left: opts.indent } : undefined,
   });
 }
- 
+
 // ── Cell helper ───────────────────────────────────────────────────────────────
 function cell(children, width, opts = {}) {
   return new TableCell({
@@ -93,17 +93,17 @@ function cell(children, width, opts = {}) {
     width: { size: width, type: WidthType.DXA },
     borders: opts.borders || NO_BORDERS,
     verticalAlign: opts.vAlign || undefined,
- 
+
     shading: opts.shading || undefined,
     margins: { top: 60, bottom: 60, left: 80, right: 80 },
   });
 }
- 
+
 // ── Page break ────────────────────────────────────────────────────────────────
 function pageBreak() {
   return new Paragraph({ children: [new PageBreak()], spacing: { before: 0, after: 0 } });
 }
- 
+
 // ── Section title (e.g. "Statement of Financial Position") ───────────────────
 function sectionTitle(text) {
   return new Paragraph({
@@ -112,7 +112,7 @@ function sectionTitle(text) {
     border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: COL_SECTION, space: 4 } },
   });
 }
- 
+
 // ── Sub-section label (e.g. "Non-current assets") ────────────────────────────
 function sectionLabel(text) {
   return new Paragraph({
@@ -120,36 +120,36 @@ function sectionLabel(text) {
     spacing: { before: 80, after: 40 },
   });
 }
- 
+
 // ── Standard FS table row ─────────────────────────────────────────────────────
 // label | note# | gap | CY amt | gap | PY amt
 function fsRow(label, noteNum, amtCY, amtPY, opts = {}) {
   // opts: bold, indent, subheader, subtotal, total, hideIfZero
   if (opts.hideIfZero && Math.abs(Number(amtCY || 0)) < 0.005 && Math.abs(Number(amtPY || 0)) < 0.005) return null;
- 
+
   const isSubheader = opts.subheader;
   const isSubtotal  = opts.subtotal;
   const isTotal     = opts.total;
   const isBold      = opts.bold || isSubtotal || isTotal || isSubheader;
- 
+
   // Amount border style
   const amtBorder = isTotal
     ? { top: SINGLE, bottom: DOUBLE, left: NO_BORDER, right: NO_BORDER }
     : isSubtotal
     ? { top: NO_BORDER, bottom: SINGLE, left: NO_BORDER, right: NO_BORDER }
     : NO_BORDERS;
- 
+
   const labelText = isSubheader
     ? run(label, { bold: true, size: SZ_NORMAL, color: COL_SECTION })
     : run((opts.indent ? '    ' : '') + label, { bold: isBold, size: SZ_NORMAL });
- 
+
   const noteText = noteNum
     ? run(String(noteNum), { size: SZ_SMALL, color: COL_NOTE_BLUE })
     : run('');
- 
+
   const cy = (amtCY !== null && amtCY !== undefined) ? fmtNum(amtCY) : '';
   const py = (amtPY !== null && amtPY !== undefined) ? fmtNum(amtPY) : '';
- 
+
   return new TableRow({
     children: [
       cell(para(labelText), COL_PART),
@@ -163,7 +163,7 @@ function fsRow(label, noteNum, amtCY, amtPY, opts = {}) {
     ],
   });
 }
- 
+
 // ── FS Table wrapper ──────────────────────────────────────────────────────────
 function fsTable(rows) {
   const validRows = rows.filter(Boolean);
@@ -175,7 +175,7 @@ function fsTable(rows) {
     rows: validRows,
   });
 }
- 
+
 // ── Table header row (year columns) ──────────────────────────────────────────
 function tableHeaderRow(cy, py, currency) {
   return [
@@ -203,7 +203,7 @@ function tableHeaderRow(cy, py, currency) {
     }),
   ];
 }
- 
+
 // ── Helper: look up amount from fsLines ──────────────────────────────────────
 function amt(lines, ...keywords) {
   const kw = keywords.map(k => k.toLowerCase());
@@ -221,7 +221,7 @@ function sumAmt(lines, ...keywords) {
     .filter(l => kw.some(k => (l.groupName || '').toLowerCase().includes(k)))
     .reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
 }
- 
+
 // ── Build BS ──────────────────────────────────────────────────────────────────
 function buildBS(lines, engagement, currency, fyLabel) {
   const isIFRS  = ['IFRS', 'IFRS_SME'].includes(engagement.method);
@@ -231,20 +231,20 @@ function buildBS(lines, engagement, currency, fyLabel) {
     : 'Balance Sheet';
   const cyYear = fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel;
   const pyYear = String(Number(cyYear) - 1);
- 
+
   // Group all lines by category
   const bsLines = lines.filter(l => l.sheet === 'BS');
- 
+
   // Build rows dynamically from actual mapped data
   const rows = [
     ...tableHeaderRow(cyYear, pyYear, currency),
   ];
- 
+
   // ASSETS section
   rows.push(new TableRow({ children: [
     cell(para(run('ASSETS', { bold: true, size: SZ_NORMAL, color: COL_SECTION })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2, { span: 6 }),
   ]}));
- 
+
   // Non-current assets
   const ncaLines = bsLines.filter(l => ['ppe','plant','equipment','intangible','goodwill','investment','deferred tax asset','right of use','biological','non-current'].some(k => l.groupName.toLowerCase().includes(k)));
   if (ncaLines.length) {
@@ -261,7 +261,7 @@ function buildBS(lines, engagement, currency, fyLabel) {
     const ncaTotal = ncaLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
     rows.push(fsRow('Total non-current assets', null, ncaTotal, null, { subtotal: true }));
   }
- 
+
   // Current assets
   const caLines = bsLines.filter(l => ['inventory','inventories','receivable','cash','bank','prepaid','current','trade receivable','advance','tax asset'].some(k => l.groupName.toLowerCase().includes(k)) && !l.groupName.toLowerCase().includes('non-current'));
   if (caLines.length) {
@@ -278,16 +278,16 @@ function buildBS(lines, engagement, currency, fyLabel) {
     const caTotal = caLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
     rows.push(fsRow('Total current assets', null, caTotal, null, { subtotal: true }));
   }
- 
+
   const allAssets = bsLines.filter(l => ['Assets','asset'].some(k => (l.assetLiability || '').includes(k)));
   const totalAssets = allAssets.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
   rows.push(fsRow('TOTAL ASSETS', null, totalAssets, null, { total: true }));
- 
+
   // EQUITY AND LIABILITIES
   rows.push(new TableRow({ children: [
     cell(para(run('EQUITY AND LIABILITIES', { bold: true, color: COL_SECTION })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2),
   ]}));
- 
+
   const eqLines = bsLines.filter(l => l.assetLiability === 'Equity');
   if (eqLines.length) {
     rows.push(new TableRow({ children: [
@@ -303,7 +303,7 @@ function buildBS(lines, engagement, currency, fyLabel) {
     const eqTotal = eqLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
     rows.push(fsRow('Total equity', null, eqTotal, null, { subtotal: true }));
   }
- 
+
   const nclLines = bsLines.filter(l => l.assetLiability === 'Liabilities' && ['long term','non-current','deferred tax liab','lease'].some(k => l.groupName.toLowerCase().includes(k)));
   if (nclLines.length) {
     rows.push(new TableRow({ children: [
@@ -319,7 +319,7 @@ function buildBS(lines, engagement, currency, fyLabel) {
     const nclTotal = nclLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
     rows.push(fsRow('Total non-current liabilities', null, nclTotal, null, { subtotal: true }));
   }
- 
+
   const clLines = bsLines.filter(l => l.assetLiability === 'Liabilities' && !['long term','non-current','deferred tax liab','lease'].some(k => l.groupName.toLowerCase().includes(k)));
   if (clLines.length) {
     rows.push(new TableRow({ children: [
@@ -335,11 +335,11 @@ function buildBS(lines, engagement, currency, fyLabel) {
     const clTotal = clLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
     rows.push(fsRow('Total current liabilities', null, clTotal, null, { subtotal: true }));
   }
- 
+
   const allLiabEq = bsLines.filter(l => l.assetLiability === 'Liabilities' || l.assetLiability === 'Equity');
   const totalEqLiab = allLiabEq.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
   rows.push(fsRow('TOTAL EQUITY AND LIABILITIES', null, totalEqLiab, null, { total: true }));
- 
+
   return [
     sectionTitle(title),
     new Paragraph({ children: [run(`As at ${isIFRS ? '31 December' : '31 March'} ${cyYear}`, { size: SZ_SMALL, color: COL_GREY, italics: true })], spacing: { before: 60, after: 120 } }),
@@ -348,7 +348,7 @@ function buildBS(lines, engagement, currency, fyLabel) {
     pageBreak(),
   ];
 }
- 
+
 // ── Build P&L ─────────────────────────────────────────────────────────────────
 function buildPL(lines, engagement, currency, fyLabel) {
   const isIFRS = ['IFRS', 'IFRS_SME'].includes(engagement.method);
@@ -359,12 +359,12 @@ function buildPL(lines, engagement, currency, fyLabel) {
   const cyYear = fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel;
   const pyYear = String(Number(cyYear) - 1);
   const plLines = lines.filter(l => l.sheet === 'PL');
- 
+
   const rows = [...tableHeaderRow(`Year ended\n${cyYear}`, `Year ended\n${pyYear}`, currency)];
- 
+
   const incomeLines = plLines.filter(l => l.assetLiability === 'Income');
   const expenseLines = plLines.filter(l => l.assetLiability === 'Expenses');
- 
+
   if (incomeLines.length) {
     rows.push(new TableRow({ children: [
       cell(para(run('Revenue and other income', { bold: true, color: COL_SECTION })), COL_PART),
@@ -379,7 +379,7 @@ function buildPL(lines, engagement, currency, fyLabel) {
     const incTotal = incomeLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
     rows.push(fsRow('Total revenue', null, incTotal, null, { subtotal: true }));
   }
- 
+
   if (expenseLines.length) {
     rows.push(new TableRow({ children: [
       cell(para(run('Expenses', { bold: true, color: COL_SECTION })), COL_PART),
@@ -394,11 +394,11 @@ function buildPL(lines, engagement, currency, fyLabel) {
     const expTotal = expenseLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
     rows.push(fsRow('Total expenses', null, expTotal, null, { subtotal: true }));
   }
- 
+
   const incTotal = incomeLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
   const expTotal = expenseLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
   rows.push(fsRow('Profit / (Loss) for the year', null, incTotal - expTotal, null, { total: true }));
- 
+
   return [
     sectionTitle(title),
     new Paragraph({ children: [run(`For the year ended ${isIFRS ? '31 December' : '31 March'} ${cyYear}`, { size: SZ_SMALL, color: COL_GREY, italics: true })], spacing: { before: 60, after: 120 } }),
@@ -407,17 +407,17 @@ function buildPL(lines, engagement, currency, fyLabel) {
     pageBreak(),
   ];
 }
- 
+
 // ── Build Notes ───────────────────────────────────────────────────────────────
 function buildNotes(noteGroups, currency) {
   const sections = [
     sectionTitle('Notes to the Financial Statements'),
     new Paragraph({ children: [run(`All amounts in ${currency} unless otherwise stated`, { size: SZ_SMALL, color: COL_GREY, italics: true })], spacing: { before: 60, after: 160 } }),
   ];
- 
+
   for (const note of noteGroups) {
     if (Math.abs(Number(note.total)) < 0.005) continue;
- 
+
     // Note heading
     sections.push(new Paragraph({
       children: [
@@ -426,12 +426,12 @@ function buildNotes(noteGroups, currency) {
       ],
       spacing: { before: 200, after: 80 },
     }));
- 
+
     // Note table: Particulars | CY | PY
     const noteColPart = 5500;
     const noteColAmt  = 1663;
     const noteTotalW  = noteColPart + noteColAmt;
- 
+
     const noteRows = [
       // Header row
       new TableRow({ children: [
@@ -440,7 +440,7 @@ function buildNotes(noteGroups, currency) {
           { borders: { top: NO_BORDER, bottom: SINGLE, left: NO_BORDER, right: NO_BORDER } }),
       ]}),
     ];
- 
+
     // Only subGroupName + subtotal (no ledger detail in export)
     const visibleSGs = (note.subGroups || []).filter(sg => Math.abs(Number(sg.subtotal)) >= 0.005);
     for (const sg of visibleSGs) {
@@ -449,14 +449,14 @@ function buildNotes(noteGroups, currency) {
         cell(para(run(fmtNum(sg.subtotal), { size: SZ_NORMAL }), { alignment: AlignmentType.RIGHT }), noteColAmt),
       ]}));
     }
- 
+
     // Total row
     noteRows.push(new TableRow({ children: [
       cell(para(run(`Total — ${note.title}`, { bold: true, size: SZ_NORMAL })), noteColPart),
       cell(para(run(fmtNum(note.total), { bold: true, size: SZ_NORMAL }), { alignment: AlignmentType.RIGHT }), noteColAmt,
         { borders: { top: SINGLE, bottom: DOUBLE, left: NO_BORDER, right: NO_BORDER } }),
     ]}));
- 
+
     sections.push(new Table({
       width: { size: noteTotalW, type: WidthType.DXA },
       columnWidths: [noteColPart, noteColAmt],
@@ -465,10 +465,251 @@ function buildNotes(noteGroups, currency) {
     }));
     sections.push(new Paragraph({ text: '', spacing: { after: 120 } }));
   }
- 
+
   return sections;
 }
- 
+
+// ── Schedule table helper ─────────────────────────────────────────────────────
+function schedTable(headers, rows, colWidths) {
+  const hdrRow = new TableRow({ children: headers.map((h, i) =>
+    cell(para(run(h, { bold: true, size: SZ_SMALL }), { alignment: i > 0 ? AlignmentType.RIGHT : AlignmentType.LEFT }),
+      colWidths[i], { borders: { top: NO_BORDER, bottom: SINGLE, left: NO_BORDER, right: NO_BORDER } })
+  )});
+  return new Table({
+    width: { size: colWidths.reduce((a,b) => a+b, 0), type: WidthType.DXA },
+    columnWidths: colWidths,
+    borders: { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER, insideH: NO_BORDER, insideV: NO_BORDER },
+    rows: [hdrRow, ...rows.filter(Boolean)],
+  });
+}
+
+function schedRow(cells, colWidths, opts = {}) {
+  return new TableRow({ children: cells.map((txt, i) =>
+    cell(para(run(String(txt ?? ''), { bold: opts.bold, size: SZ_NORMAL }),
+      { alignment: i > 0 ? AlignmentType.RIGHT : AlignmentType.LEFT }),
+      colWidths[i],
+      opts.borders ? { borders: opts.borders } : undefined)
+  )});
+}
+
+function totalRow(cells, colWidths) {
+  return new TableRow({ children: cells.map((txt, i) =>
+    cell(para(run(String(txt ?? ''), { bold: true, size: SZ_NORMAL }),
+      { alignment: i > 0 ? AlignmentType.RIGHT : AlignmentType.LEFT }),
+      colWidths[i],
+      { borders: { top: SINGLE, bottom: DOUBLE, left: NO_BORDER, right: NO_BORDER } })
+  )});
+}
+
+function hasValue(rows, ...fields) {
+  return rows.some(r => fields.some(f => Math.abs(Number(r[f] || 0)) >= 0.005));
+}
+
+// ── PPE Schedule ──────────────────────────────────────────────────────────────
+function buildPPESchedule(classes, noteNum, currency) {
+  if (!classes?.length || !hasValue(classes, 'openingGross','additions','disposals','closingGross','openingDepr','deprForYear')) return [];
+  const W = [2800, 1000, 900, 900, 1000, 900, 900, 1000];
+  const totW = W.reduce((a,b)=>a+b,0);
+  const rows = classes.map(cls => {
+    const closingDepr = Number(cls.openingDepr||0) + Number(cls.deprForYear||0) - Number(cls.deprOnDisposal||0);
+    const netBlock    = Number(cls.closingGross||0) - closingDepr;
+    return schedRow([
+      cls.assetClass||'', fmtNum(cls.openingGross), fmtNum(cls.additions),
+      fmtNum(cls.disposals), fmtNum(cls.closingGross), fmtNum(cls.deprForYear),
+      fmtNum(cls.deprOnDisposal), fmtNum(netBlock)
+    ], W);
+  });
+  const tot = (f) => classes.reduce((s,r) => s+Number(r[f]||0), 0);
+  const totDepr = tot('openingDepr') + tot('deprForYear') - tot('deprOnDisposal');
+  rows.push(totalRow([
+    'Total', fmtNum(tot('openingGross')), fmtNum(tot('additions')), fmtNum(tot('disposals')),
+    fmtNum(tot('closingGross')), fmtNum(tot('deprForYear')), fmtNum(tot('deprOnDisposal')),
+    fmtNum(tot('closingGross') - totDepr)
+  ], W));
+
+  return [
+    new Paragraph({ children: [
+      run(`Note ${noteNum}: `, { bold: true, size: SZ_HEADING, color: COL_NOTE_BLUE }),
+      run('Property, Plant and Equipment', { bold: true, size: SZ_HEADING, color: COL_SECTION }),
+    ], spacing: { before: 200, after: 80 } }),
+    new Paragraph({ children: [run(`All amounts in ${currency}`, { size: SZ_SMALL, color: COL_GREY, italics: true })], spacing: { before: 0, after: 80 } }),
+    schedTable(['Asset Class','Opening Gross','Additions','Disposals','Closing Gross','Depn. for Year','Depn. on Disposal','Net Block'], rows, W),
+    new Paragraph({ text: '', spacing: { after: 120 } }),
+  ];
+}
+
+// ── Intangibles Schedule ──────────────────────────────────────────────────────
+function buildIntangiblesSchedule(classes, noteNum, currency) {
+  if (!classes?.length || !hasValue(classes, 'openingGross','additions','disposals')) return [];
+  const W = [3000, 1000, 900, 900, 1000, 900, 1000];
+  const rows = classes.map(cls => {
+    const closingAmort = Number(cls.openingAmort||0) + Number(cls.amortForYear||0) - Number(cls.amortOnDisposal||0);
+    const netBlock = Number(cls.additions||0) + Number(cls.openingGross||0) - Number(cls.disposals||0) - closingAmort;
+    return schedRow([
+      cls.assetClass||'', fmtNum(cls.openingGross), fmtNum(cls.additions),
+      fmtNum(cls.disposals), fmtNum(Number(cls.openingGross||0)+Number(cls.additions||0)-Number(cls.disposals||0)),
+      fmtNum(cls.amortForYear), fmtNum(netBlock)
+    ], W);
+  });
+  const tot = (f) => classes.reduce((s,r) => s+Number(r[f]||0), 0);
+  rows.push(totalRow([
+    'Total', fmtNum(tot('openingGross')), fmtNum(tot('additions')), fmtNum(tot('disposals')),
+    fmtNum(tot('openingGross')+tot('additions')-tot('disposals')), fmtNum(tot('amortForYear')),
+    fmtNum(tot('openingGross')+tot('additions')-tot('disposals')-(tot('openingAmort')+tot('amortForYear')-tot('amortOnDisposal')))
+  ], W));
+
+  return [
+    new Paragraph({ children: [
+      run(`Note ${noteNum}: `, { bold: true, size: SZ_HEADING, color: COL_NOTE_BLUE }),
+      run('Intangible Assets', { bold: true, size: SZ_HEADING, color: COL_SECTION }),
+    ], spacing: { before: 200, after: 80 } }),
+    schedTable(['Asset Class','Opening Gross','Additions','Disposals','Closing Gross','Amortisation','Net Block'], rows, W),
+    new Paragraph({ text: '', spacing: { after: 120 } }),
+  ];
+}
+
+// ── Related Party Transactions ─────────────────────────────────────────────────
+function buildRPSchedule(parties, transactions, noteNum, currency) {
+  if (!parties?.length || !transactions?.length) return [];
+  const W = [2500, 1800, 1500, 1000];
+  const rows = transactions.map(t => {
+    const party = parties.find(p => p.id === t.relatedPartyId);
+    return schedRow([
+      party?.name || '', t.transactionType || '', t.description || '', fmtNum(t.amount)
+    ], W);
+  });
+  const total = transactions.reduce((s,t) => s+Number(t.amount||0), 0);
+  rows.push(totalRow(['Total', '', '', fmtNum(total)], W));
+
+  return [
+    new Paragraph({ children: [
+      run(`Note ${noteNum}: `, { bold: true, size: SZ_HEADING, color: COL_NOTE_BLUE }),
+      run('Related Party Transactions', { bold: true, size: SZ_HEADING, color: COL_SECTION }),
+    ], spacing: { before: 200, after: 80 } }),
+    schedTable(['Party Name','Transaction Type','Description',`Amount (${currency})`], rows, W),
+    new Paragraph({ text: '', spacing: { after: 120 } }),
+  ];
+}
+
+// ── EPS Schedule ───────────────────────────────────────────────────────────────
+function buildEPSSchedule(eps, noteNum, currency) {
+  if (!eps) return [];
+  const pat  = Number(eps.patFromPL||0) - Number(eps.prefDividend||0);
+  const wAvg = Number(eps.weightedAvgShares||0);
+  const dil  = Number(eps.dilutiveShares||0);
+  if (Math.abs(pat) < 0.005 || wAvg < 1) return [];
+  const basic = wAvg > 0 ? (pat / wAvg).toFixed(2) : '0.00';
+  const diluted = (wAvg + dil) > 0 ? (pat / (wAvg + dil)).toFixed(2) : '0.00';
+  const W = [5000, 2000];
+  const rows = [
+    schedRow(['Profit attributable to equity holders', fmtNum(pat)], W),
+    schedRow(['Weighted average shares (Basic)', fmtNum(wAvg)], W),
+    schedRow(['Weighted average shares (Diluted)', fmtNum(wAvg + dil)], W),
+    schedRow(['Basic EPS', basic], W, { bold: true }),
+    schedRow(['Diluted EPS', diluted], W, { bold: true }),
+    schedRow(['Face value per share', fmtNum(eps.faceValue)], W),
+  ];
+
+  return [
+    new Paragraph({ children: [
+      run(`Note ${noteNum}: `, { bold: true, size: SZ_HEADING, color: COL_NOTE_BLUE }),
+      run('Earnings Per Share (EPS)', { bold: true, size: SZ_HEADING, color: COL_SECTION }),
+    ], spacing: { before: 200, after: 80 } }),
+    schedTable(['Particulars', `Amount (${currency})`], rows, W),
+    new Paragraph({ text: '', spacing: { after: 120 } }),
+  ];
+}
+
+// ── Deferred Tax Schedule ──────────────────────────────────────────────────────
+function buildDTSchedule(items, noteNum, currency) {
+  if (!items?.length || !hasValue(items, 'openingDiff','createdInPL','reversedInPL')) return [];
+  const assets  = items.filter(i => i.isAsset);
+  const liabs   = items.filter(i => !i.isAsset);
+  const W = [3000, 1100, 1100, 1100, 1100];
+  const makeRows = (arr) => arr.map(i => schedRow([
+    i.description||'', fmtNum(i.openingDiff), fmtNum(i.createdInPL),
+    fmtNum(i.reversedInPL), fmtNum(Number(i.openingDiff||0)+Number(i.createdInPL||0)-Number(i.reversedInPL||0))
+  ], W));
+  const tot = (arr, f) => arr.reduce((s,r) => s+Number(r[f]||0), 0);
+
+  const rows = [];
+  if (assets.length) {
+    rows.push(schedRow(['Deferred Tax Assets', '', '', '', ''], W, { bold: true }));
+    rows.push(...makeRows(assets));
+    rows.push(totalRow(['Total DTA', fmtNum(tot(assets,'openingDiff')), fmtNum(tot(assets,'createdInPL')),
+      fmtNum(tot(assets,'reversedInPL')), fmtNum(tot(assets,'openingDiff')+tot(assets,'createdInPL')-tot(assets,'reversedInPL'))], W));
+  }
+  if (liabs.length) {
+    rows.push(schedRow(['Deferred Tax Liabilities', '', '', '', ''], W, { bold: true }));
+    rows.push(...makeRows(liabs));
+    rows.push(totalRow(['Total DTL', fmtNum(tot(liabs,'openingDiff')), fmtNum(tot(liabs,'createdInPL')),
+      fmtNum(tot(liabs,'reversedInPL')), fmtNum(tot(liabs,'openingDiff')+tot(liabs,'createdInPL')-tot(liabs,'reversedInPL'))], W));
+  }
+
+  return [
+    new Paragraph({ children: [
+      run(`Note ${noteNum}: `, { bold: true, size: SZ_HEADING, color: COL_NOTE_BLUE }),
+      run('Deferred Tax', { bold: true, size: SZ_HEADING, color: COL_SECTION }),
+    ], spacing: { before: 200, after: 80 } }),
+    schedTable(['Description','Opening','Created in P&L','Reversed in P&L','Closing'], rows, W),
+    new Paragraph({ text: '', spacing: { after: 120 } }),
+  ];
+}
+
+// ── Contingencies Schedule ─────────────────────────────────────────────────────
+function buildContingenciesSchedule(items, noteNum, currency) {
+  if (!items?.length) return [];
+  const W = [2000, 1500, 2500, 1000];
+  const rows = items.map(i => schedRow([
+    i.contingencyType||'', i.category||'', i.description||'',
+    i.amount ? fmtNum(i.amount) : 'Not quantifiable'
+  ], W));
+
+  return [
+    new Paragraph({ children: [
+      run(`Note ${noteNum}: `, { bold: true, size: SZ_HEADING, color: COL_NOTE_BLUE }),
+      run('Contingent Liabilities and Capital Commitments', { bold: true, size: SZ_HEADING, color: COL_SECTION }),
+    ], spacing: { before: 200, after: 80 } }),
+    schedTable(['Type','Category','Description',`Amount (${currency})`], rows, W),
+    new Paragraph({ text: '', spacing: { after: 120 } }),
+  ];
+}
+
+// ── Financial Instruments Schedule ────────────────────────────────────────────
+function buildFISchedule(fi, noteNum, currency) {
+  if (!fi) return [];
+  const maxExp = Number(fi.maxExposure||0);
+  if (maxExp < 0.005) return [];
+  const W = [4000, 2000];
+  const rows = [
+    schedRow(['Maximum credit risk exposure', fmtNum(fi.maxExposure)], W),
+    schedRow(['', ''], W),
+    schedRow(['Maturity Analysis of Financial Liabilities', ''], W, { bold: true }),
+    schedRow(['Less than 1 year', fmtNum(fi.liabLt1yr)], W),
+    schedRow(['1 to 3 years', fmtNum(fi.liab1to3yr)], W),
+    schedRow(['3 to 5 years', fmtNum(fi.liab3to5yr)], W),
+    schedRow(['Greater than 5 years', fmtNum(fi.liabGt5yr)], W),
+    schedRow(['', ''], W),
+    schedRow(['Interest Rate Analysis', ''], W, { bold: true }),
+    schedRow(['Fixed rate instruments', fmtNum(fi.fixedRateAmt)], W),
+    schedRow(['Floating rate instruments', fmtNum(fi.floatRateAmt)], W),
+    schedRow(['', ''], W),
+    schedRow(['Fair Value Hierarchy', ''], W, { bold: true }),
+    schedRow(['Level 1 (Quoted prices)', fmtNum(fi.level1Amt)], W),
+    schedRow(['Level 2 (Observable inputs)', fmtNum(fi.level2Amt)], W),
+    schedRow(['Level 3 (Unobservable inputs)', fmtNum(fi.level3Amt)], W),
+  ].filter(Boolean);
+
+  return [
+    new Paragraph({ children: [
+      run(`Note ${noteNum}: `, { bold: true, size: SZ_HEADING, color: COL_NOTE_BLUE }),
+      run('Financial Instruments', { bold: true, size: SZ_HEADING, color: COL_SECTION }),
+    ], spacing: { before: 200, after: 80 } }),
+    schedTable(['Particulars', `Amount (${currency})`], rows, W),
+    new Paragraph({ text: '', spacing: { after: 120 } }),
+  ];
+}
+
 // ── Collapse note details into subgroups ──────────────────────────────────────
 function collapseNotes(noteDetails) {
   const groups = new Map();
@@ -480,7 +721,7 @@ function collapseNotes(noteDetails) {
   }
   return Array.from(groups.values());
 }
- 
+
 // ── Header builder ────────────────────────────────────────────────────────────
 function buildHeader(engagement, firmName) {
   const clientName = engagement.client?.name || '';
@@ -489,7 +730,7 @@ function buildHeader(engagement, firmName) {
   const isIFRS_hdr  = ['IFRS', 'IFRS_SME'].includes(method);
   const cyYear_hdr  = fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel;
   const closingDate = isIFRS_hdr ? `31 December ${cyYear_hdr}` : `31 March ${cyYear_hdr}`;
- 
+
   return new Header({
     children: [
       new Paragraph({
@@ -504,7 +745,7 @@ function buildHeader(engagement, firmName) {
     ],
   });
 }
- 
+
 // ── Footer builder ────────────────────────────────────────────────────────────
 function buildFooter(firmName) {
   return new Footer({
@@ -523,7 +764,7 @@ function buildFooter(firmName) {
     ],
   });
 }
- 
+
 // ── MAIN EXPORT FUNCTION ──────────────────────────────────────────────────────
 async function exportWord(engagementId, firmId) {
   const engRows = await prisma.$queryRawUnsafe(
@@ -544,7 +785,7 @@ async function exportWord(engagementId, firmId) {
               gstin: engRow.gstin, tradeLicense: engRow.tradeLicense,
               vatNumber: engRow.vatNumber, region: engRow.clientRegion },
   };
- 
+
   const method   = engagement.method || 'AS';
   const isIFRS   = ['IFRS', 'IFRS_SME'].includes(method);
   const isIndAS  = method === 'IND_AS';
@@ -553,23 +794,32 @@ async function exportWord(engagementId, firmId) {
     : (method === 'AS' || method === 'IND_AS') ? 'INR'
     : 'INR';
   const fyLabel  = engagement.financialYear || '';
- 
-  const [rawFsLines, noteGroups] = await Promise.all([
+
+  const [rawFsLines, noteGroups, ppeClasses, intangibles, relatedParties,
+    rpTransactions, epsData, dtItems, fiNote, contingencies] = await Promise.all([
     prisma.fSLine.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } }),
     prisma.noteGroup.findMany({
       where: { engagementId },
       orderBy: { noteNumber: 'asc' },
       include: { noteDetails: { orderBy: { displayOrder: 'asc' } } },
     }),
+    prisma.pPEClass.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } }).catch(() => []),
+    prisma.intangibleClass.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } }).catch(() => []),
+    prisma.relatedParty.findMany({ where: { engagementId, isActive: true } }).catch(() => []),
+    prisma.rPTransaction.findMany({ where: { engagementId } }).catch(() => []),
+    prisma.ePSData.findFirst({ where: { engagementId } }).catch(() => null),
+    prisma.deferredTaxItem.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } }).catch(() => []),
+    prisma.financialInstrumentNote.findFirst({ where: { engagementId } }).catch(() => null),
+    prisma.contingency.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } }).catch(() => []),
   ]);
- 
+
   // Join FSLines with NoteGroups
   const ngMap = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
   const fsLines = rawFsLines.map(l => ({
     ...l,
     noteGroup: l.noteGroupId ? ngMap.get(l.noteGroupId) || null : null,
   }));
- 
+
   // Structure notes
   const structuredNotes = noteGroups
     .filter(ng => !ng.noteGroupId?.startsWith('__'))
@@ -579,7 +829,7 @@ async function exportWord(engagementId, firmId) {
       total: ng.noteDetails.reduce((s, d) => s + Number(d.finalNet || 0), 0),
       subGroups: collapseNotes(ng.noteDetails),
     }));
- 
+
   // Build all sections
   const children = [
     // Cover page
@@ -588,20 +838,48 @@ async function exportWord(engagementId, firmId) {
     new Paragraph({ children: [run(`For the year ended ${isIFRS ? '31 December' : '31 March'} ${fyLabel.split('-').length > 1 ? '20' + fyLabel.split('-')[1] : fyLabel}`, { size: SZ_HEADING, color: COL_GREY })], alignment: AlignmentType.CENTER, spacing: { before: 0, after: 200 } }),
     new Paragraph({ children: [run(method, { size: SZ_NORMAL, color: COL_NOTE_BLUE })], alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0 } }),
     pageBreak(),
- 
+
     // Balance Sheet
     ...buildBS(fsLines, engagement, currency, fyLabel),
- 
+
     // P&L
     ...buildPL(fsLines, engagement, currency, fyLabel),
- 
+
     // Notes
     ...buildNotes(structuredNotes, currency),
+
+    // ── Schedules (only if data exists) ───────────────────────────────────────
+    // Find PPE note number from NoteGroup
+    ...(()=>{
+      const method = engagement.method || 'AS';
+      // Get last note number from noteGroups
+      const lastNoteNum = noteGroups.reduce((max, ng) => Math.max(max, ng.noteNumber||0), 0);
+      // Find PPE noteGroup if it exists
+      const ppeNG = noteGroups.find(ng => ng.title?.toLowerCase().includes('ppe') ||
+        ng.title?.toLowerCase().includes('property, plant') ||
+        ng.title?.toLowerCase().includes('fixed asset') ||
+        ng.title?.toLowerCase().includes('tangible asset'));
+      const intNG = noteGroups.find(ng => ng.title?.toLowerCase().includes('intangible'));
+
+      const ppeNoteNum  = ppeNG?.noteNumber  || lastNoteNum + 1;
+      const intNoteNum  = intNG?.noteNumber  || ppeNoteNum + 1;
+      let schedNoteNum  = Math.max(ppeNoteNum, intNoteNum) + 1;
+
+      const sections = [];
+      if (ppeClasses?.length)      sections.push(...buildPPESchedule(ppeClasses, ppeNoteNum, currency));
+      if (intangibles?.length)     sections.push(...buildIntangiblesSchedule(intangibles, intNoteNum, currency));
+      if (relatedParties?.length && rpTransactions?.length) { sections.push(...buildRPSchedule(relatedParties, rpTransactions, schedNoteNum++, currency)); }
+      if (epsData)                 sections.push(...buildEPSSchedule(epsData, schedNoteNum++, currency));
+      if (dtItems?.length)         sections.push(...buildDTSchedule(dtItems, schedNoteNum++, currency));
+      if (contingencies?.length)   sections.push(...buildContingenciesSchedule(contingencies, schedNoteNum++, currency));
+      if (fiNote)                  sections.push(...buildFISchedule(fiNote, schedNoteNum++, currency));
+      return sections;
+    })(),
   ];
- 
+
   const header = buildHeader(engagement, engRow.firmName);
   const footer = buildFooter(engRow.firmName);
- 
+
   const doc = new Document({
     styles: {
       default: { document: { run: { font: FONT, size: SZ_NORMAL } } },
@@ -618,16 +896,16 @@ async function exportWord(engagementId, firmId) {
       children,
     }],
   });
- 
+
   return Packer.toBuffer(doc);
 }
- 
+
 // ── Excel export (unchanged) ──────────────────────────────────────────────────
 async function exportExcel(engagementId, firmId) {
   const ExcelJS = require('exceljs');
   const wb = new ExcelJS.Workbook();
   wb.creator = 'FinStatement';
- 
+
   const engRows = await prisma.$queryRawUnsafe(
     `SELECT e.*, c.name as "clientName", c.region as "clientRegion"
      FROM "Engagement" e JOIN "Client" c ON c.id = e."clientId"
@@ -638,14 +916,14 @@ async function exportExcel(engagementId, firmId) {
   const eng = engRows[0];
   const method   = eng.method || 'AS';
   const currency = ['IFRS','IFRS_SME'].includes(method) ? 'AED' : 'INR';
- 
+
   const [rawFsLines, noteGroups] = await Promise.all([
     prisma.fSLine.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } }),
     prisma.noteGroup.findMany({ where: { engagementId }, orderBy: { noteNumber: 'asc' }, include: { noteDetails: { orderBy: { displayOrder: 'asc' } } } }),
   ]);
   const ngMap2 = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
   const fsLines2 = rawFsLines.map(l => ({ ...l, noteGroup: l.noteGroupId ? ngMap2.get(l.noteGroupId) : null }));
- 
+
   function addSheet(name, lines, title) {
     const ws = wb.addWorksheet(name);
     ws.columns = [
@@ -656,7 +934,7 @@ async function exportExcel(engagementId, firmId) {
     ws.getRow(1).font = { bold: true, size: 11 };
     ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
     ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
- 
+
     let rowIdx = 2;
     for (const l of lines) {
       const v = Number(l.totalFinalNet || 0);
@@ -668,10 +946,10 @@ async function exportExcel(engagementId, firmId) {
     }
     return ws;
   }
- 
+
   addSheet('Balance Sheet', fsLines2.filter(l => l.sheet === 'BS'), 'Balance Sheet');
   addSheet('Profit & Loss', fsLines2.filter(l => l.sheet === 'PL'), 'P&L');
- 
+
   // Notes sheet
   const wsN = wb.addWorksheet('Notes');
   wsN.columns = [
@@ -687,7 +965,7 @@ async function exportExcel(engagementId, firmId) {
     const hRow = wsN.addRow([ng.noteNumber, ng.title, '', '']);
     hRow.font = { bold: true }; hRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2FF' } };
     nr++;
- 
+
     const sgs = collapseNotes(ng.noteDetails);
     for (const sg of sgs) {
       if (Math.abs(sg.subtotal) < 0.005) continue;
@@ -704,10 +982,10 @@ async function exportExcel(engagementId, firmId) {
     nr++;
     wsN.addRow([]);
   }
- 
+
   return wb.xlsx.writeBuffer();
 }
- 
+
 // ── PDF data ──────────────────────────────────────────────────────────────────
 async function exportPdfData(engagementId, firmId) {
   const [fsLines, noteGroups] = await Promise.all([
@@ -716,5 +994,5 @@ async function exportPdfData(engagementId, firmId) {
   ]);
   return { fsLines, noteGroups };
 }
- 
+
 module.exports = { exportWord, exportExcel, exportPdfData, exportPDFData: exportPdfData };
