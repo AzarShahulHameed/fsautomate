@@ -3,12 +3,12 @@
 const {
   Document, Packer, Paragraph, Table, TableRow, TableCell,
   TextRun, HeadingLevel, AlignmentType, PageBreak, WidthType,
-  BorderStyle, ShadingType, Header, Footer, PageNumber,
+  BorderStyle, ShadingType, Header, Footer,
   NumberFormat, convertInchesToTwip, UnderlineType,
-  TabStopType, TabStopPosition,
+  TabStopType, TabStopPosition, PageNumber,
 } = require('docx');
 const { prisma } = require('../config/db');
-const { v4: uuid } = require('uuid');
+ 
  
 // ── Template constants (matching the illustrative FS template exactly) ─────────
 const FONT        = 'Calibri';
@@ -93,7 +93,7 @@ function cell(children, width, opts = {}) {
     width: { size: width, type: WidthType.DXA },
     borders: opts.borders || NO_BORDERS,
     verticalAlign: opts.vAlign || undefined,
-    columnSpan: opts.span || undefined,
+ 
     shading: opts.shading || undefined,
     margins: { top: 60, bottom: 60, left: 80, right: 80 },
   });
@@ -224,8 +224,11 @@ function sumAmt(lines, ...keywords) {
  
 // ── Build BS ──────────────────────────────────────────────────────────────────
 function buildBS(lines, engagement, currency, fyLabel) {
-  const isIFRS = ['IFRS', 'IFRS_SME'].includes(engagement.method);
-  const title  = isIFRS ? 'Statement of Financial Position' : 'Balance Sheet';
+  const isIFRS  = ['IFRS', 'IFRS_SME'].includes(engagement.method);
+  const isIndAS = engagement.method === 'IND_AS';
+  const title = isIFRS ? 'Statement of Financial Position'
+    : (engagement.method === 'IND_AS') ? 'Balance Sheet'
+    : 'Balance Sheet';
   const cyYear = fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel;
   const pyYear = String(Number(cyYear) - 1);
  
@@ -245,7 +248,12 @@ function buildBS(lines, engagement, currency, fyLabel) {
   // Non-current assets
   const ncaLines = bsLines.filter(l => ['ppe','plant','equipment','intangible','goodwill','investment','deferred tax asset','right of use','biological','non-current'].some(k => l.groupName.toLowerCase().includes(k)));
   if (ncaLines.length) {
-    rows.push(new TableRow({ children: [cell(para(run('Non-current assets', { bold: true })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    rows.push(new TableRow({ children: [
+      cell(para(run('Non-current assets', { bold: true })), COL_PART),
+      cell(para(run('')), COL_NOTE), cell(para(run('')), COL_GAP),
+      cell(para(run('')), COL_AMT1), cell(para(run('')), COL_GAPB),
+      cell(para(run('')), COL_AMT2),
+    ]}));
     ncaLines.forEach(l => {
       const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
       if (r) rows.push(r);
@@ -257,7 +265,12 @@ function buildBS(lines, engagement, currency, fyLabel) {
   // Current assets
   const caLines = bsLines.filter(l => ['inventory','inventories','receivable','cash','bank','prepaid','current','trade receivable','advance','tax asset'].some(k => l.groupName.toLowerCase().includes(k)) && !l.groupName.toLowerCase().includes('non-current'));
   if (caLines.length) {
-    rows.push(new TableRow({ children: [cell(para(run('Current assets', { bold: true })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    rows.push(new TableRow({ children: [
+      cell(para(run('Current assets', { bold: true })), COL_PART),
+      cell(para(run('')), COL_NOTE), cell(para(run('')), COL_GAP),
+      cell(para(run('')), COL_AMT1), cell(para(run('')), COL_GAPB),
+      cell(para(run('')), COL_AMT2),
+    ]}));
     caLines.forEach(l => {
       const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
       if (r) rows.push(r);
@@ -277,7 +290,12 @@ function buildBS(lines, engagement, currency, fyLabel) {
  
   const eqLines = bsLines.filter(l => l.assetLiability === 'Equity');
   if (eqLines.length) {
-    rows.push(new TableRow({ children: [cell(para(run('Equity', { bold: true })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    rows.push(new TableRow({ children: [
+      cell(para(run('Equity', { bold: true })), COL_PART),
+      cell(para(run('')), COL_NOTE), cell(para(run('')), COL_GAP),
+      cell(para(run('')), COL_AMT1), cell(para(run('')), COL_GAPB),
+      cell(para(run('')), COL_AMT2),
+    ]}));
     eqLines.forEach(l => {
       const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
       if (r) rows.push(r);
@@ -288,7 +306,12 @@ function buildBS(lines, engagement, currency, fyLabel) {
  
   const nclLines = bsLines.filter(l => l.assetLiability === 'Liabilities' && ['long term','non-current','deferred tax liab','lease'].some(k => l.groupName.toLowerCase().includes(k)));
   if (nclLines.length) {
-    rows.push(new TableRow({ children: [cell(para(run('Non-current liabilities', { bold: true })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    rows.push(new TableRow({ children: [
+      cell(para(run('Non-current liabilities', { bold: true })), COL_PART),
+      cell(para(run('')), COL_NOTE), cell(para(run('')), COL_GAP),
+      cell(para(run('')), COL_AMT1), cell(para(run('')), COL_GAPB),
+      cell(para(run('')), COL_AMT2),
+    ]}));
     nclLines.forEach(l => {
       const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
       if (r) rows.push(r);
@@ -299,7 +322,12 @@ function buildBS(lines, engagement, currency, fyLabel) {
  
   const clLines = bsLines.filter(l => l.assetLiability === 'Liabilities' && !['long term','non-current','deferred tax liab','lease'].some(k => l.groupName.toLowerCase().includes(k)));
   if (clLines.length) {
-    rows.push(new TableRow({ children: [cell(para(run('Current liabilities', { bold: true })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    rows.push(new TableRow({ children: [
+      cell(para(run('Current liabilities', { bold: true })), COL_PART),
+      cell(para(run('')), COL_NOTE), cell(para(run('')), COL_GAP),
+      cell(para(run('')), COL_AMT1), cell(para(run('')), COL_GAPB),
+      cell(para(run('')), COL_AMT2),
+    ]}));
     clLines.forEach(l => {
       const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
       if (r) rows.push(r);
@@ -324,7 +352,10 @@ function buildBS(lines, engagement, currency, fyLabel) {
 // ── Build P&L ─────────────────────────────────────────────────────────────────
 function buildPL(lines, engagement, currency, fyLabel) {
   const isIFRS = ['IFRS', 'IFRS_SME'].includes(engagement.method);
-  const title  = isIFRS ? 'Statement of Profit or Loss' : 'Statement of Profit and Loss';
+  const title = (engagement.method === 'IFRS') ? 'Statement of Comprehensive Income'
+    : (engagement.method === 'IFRS_SME') ? 'Statement of Comprehensive Income'
+    : (engagement.method === 'IND_AS') ? 'Statement of Profit and Loss and Other Comprehensive Income'
+    : 'Statement of Profit and Loss';
   const cyYear = fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel;
   const pyYear = String(Number(cyYear) - 1);
   const plLines = lines.filter(l => l.sheet === 'PL');
@@ -335,7 +366,12 @@ function buildPL(lines, engagement, currency, fyLabel) {
   const expenseLines = plLines.filter(l => l.assetLiability === 'Expenses');
  
   if (incomeLines.length) {
-    rows.push(new TableRow({ children: [cell(para(run('Revenue and other income', { bold: true, color: COL_SECTION })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    rows.push(new TableRow({ children: [
+      cell(para(run('Revenue and other income', { bold: true, color: COL_SECTION })), COL_PART),
+      cell(para(run('')), COL_NOTE), cell(para(run('')), COL_GAP),
+      cell(para(run('')), COL_AMT1), cell(para(run('')), COL_GAPB),
+      cell(para(run('')), COL_AMT2),
+    ]}));
     incomeLines.forEach(l => {
       const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
       if (r) rows.push(r);
@@ -345,7 +381,12 @@ function buildPL(lines, engagement, currency, fyLabel) {
   }
  
   if (expenseLines.length) {
-    rows.push(new TableRow({ children: [cell(para(run('Expenses', { bold: true, color: COL_SECTION })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    rows.push(new TableRow({ children: [
+      cell(para(run('Expenses', { bold: true, color: COL_SECTION })), COL_PART),
+      cell(para(run('')), COL_NOTE), cell(para(run('')), COL_GAP),
+      cell(para(run('')), COL_AMT1), cell(para(run('')), COL_GAPB),
+      cell(para(run('')), COL_AMT2),
+    ]}));
     expenseLines.forEach(l => {
       const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
       if (r) rows.push(r);
@@ -389,7 +430,7 @@ function buildNotes(noteGroups, currency) {
     // Note table: Particulars | CY | PY
     const noteColPart = 5500;
     const noteColAmt  = 1663;
-    const noteTotalW  = noteColPart + noteColAmt + noteColAmt;
+    const noteTotalW  = noteColPart + noteColAmt;
  
     const noteRows = [
       // Header row
@@ -397,7 +438,6 @@ function buildNotes(noteGroups, currency) {
         cell(para(run('Particulars', { bold: true, size: SZ_SMALL })), noteColPart),
         cell(para(run(currency, { bold: true, size: SZ_SMALL }), { alignment: AlignmentType.RIGHT }), noteColAmt,
           { borders: { top: NO_BORDER, bottom: SINGLE, left: NO_BORDER, right: NO_BORDER } }),
-        cell(para(run(''), { alignment: AlignmentType.RIGHT }), noteColAmt),
       ]}),
     ];
  
@@ -407,7 +447,6 @@ function buildNotes(noteGroups, currency) {
       noteRows.push(new TableRow({ children: [
         cell(para(run(sg.subGroupName, { size: SZ_NORMAL })), noteColPart),
         cell(para(run(fmtNum(sg.subtotal), { size: SZ_NORMAL }), { alignment: AlignmentType.RIGHT }), noteColAmt),
-        cell(para(run(''), { alignment: AlignmentType.RIGHT }), noteColAmt),
       ]}));
     }
  
@@ -416,12 +455,11 @@ function buildNotes(noteGroups, currency) {
       cell(para(run(`Total — ${note.title}`, { bold: true, size: SZ_NORMAL })), noteColPart),
       cell(para(run(fmtNum(note.total), { bold: true, size: SZ_NORMAL }), { alignment: AlignmentType.RIGHT }), noteColAmt,
         { borders: { top: SINGLE, bottom: DOUBLE, left: NO_BORDER, right: NO_BORDER } }),
-      cell(para(run(''), { alignment: AlignmentType.RIGHT }), noteColAmt),
     ]}));
  
     sections.push(new Table({
       width: { size: noteTotalW, type: WidthType.DXA },
-      columnWidths: [noteColPart, noteColAmt, noteColAmt],
+      columnWidths: [noteColPart, noteColAmt],
       borders: { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER, insideH: NO_BORDER, insideV: NO_BORDER },
       rows: noteRows,
     }));
@@ -448,9 +486,9 @@ function buildHeader(engagement, firmName) {
   const clientName = engagement.client?.name || '';
   const method     = engagement.method || 'IFRS';
   const fyLabel    = engagement.financialYear || '';
-  const isIFRS     = ['IFRS', 'IFRS_SME'].includes(method);
-  const cyYear     = fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel;
-  const closingDate = isIFRS ? `31 December ${cyYear}` : `31 March ${cyYear}`;
+  const isIFRS_hdr  = ['IFRS', 'IFRS_SME'].includes(method);
+  const cyYear_hdr  = fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel;
+  const closingDate = isIFRS_hdr ? `31 December ${cyYear_hdr}` : `31 March ${cyYear_hdr}`;
  
   return new Header({
     children: [
@@ -476,7 +514,7 @@ function buildFooter(firmName) {
           run(firmName || 'FinStatement', { size: SZ_SMALL, color: COL_GREY }),
           new TextRun({ text: '\t', size: SZ_SMALL }),
           run('Page ', { size: SZ_SMALL, color: COL_GREY }),
-          new PageNumber({ size: SZ_SMALL, color: COL_GREY }),
+          new TextRun({ children: [PageNumber.CURRENT], font: FONT, size: SZ_SMALL, color: COL_GREY }),
         ],
         tabStops: [{ type: TabStopType.RIGHT, position: TOTAL_W }],
         border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'cbd5e1', space: 4 } },
@@ -507,9 +545,13 @@ async function exportWord(engagementId, firmId) {
               vatNumber: engRow.vatNumber, region: engRow.clientRegion },
   };
  
-  const method   = engagement.method || 'IFRS';
+  const method   = engagement.method || 'AS';
   const isIFRS   = ['IFRS', 'IFRS_SME'].includes(method);
-  const currency = (method === 'IFRS' || method === 'IFRS_SME') ? 'AED' : '₹';
+  const isIndAS  = method === 'IND_AS';
+  // Currency: method is always authoritative
+  const currency = (method === 'IFRS' || method === 'IFRS_SME') ? 'AED'
+    : (method === 'AS' || method === 'IND_AS') ? 'INR'
+    : 'INR';
   const fyLabel  = engagement.financialYear || '';
  
   const [rawFsLines, noteGroups] = await Promise.all([
@@ -543,7 +585,7 @@ async function exportWord(engagementId, firmId) {
     // Cover page
     new Paragraph({ children: [run(engRow.clientName || '', { bold: true, size: 48, color: COL_SECTION })], alignment: AlignmentType.CENTER, spacing: { before: 2000, after: 200 } }),
     new Paragraph({ children: [run('Financial Statements', { bold: true, size: 36, color: COL_GREY })], alignment: AlignmentType.CENTER, spacing: { before: 0, after: 200 } }),
-    new Paragraph({ children: [run(`For the year ended ${isIFRS ? '31 December' : '31 March'} ${fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel}`, { size: SZ_HEADING, color: COL_GREY })], alignment: AlignmentType.CENTER, spacing: { before: 0, after: 200 } }),
+    new Paragraph({ children: [run(`For the year ended ${isIFRS ? '31 December' : '31 March'} ${fyLabel.split('-').length > 1 ? '20' + fyLabel.split('-')[1] : fyLabel}`, { size: SZ_HEADING, color: COL_GREY })], alignment: AlignmentType.CENTER, spacing: { before: 0, after: 200 } }),
     new Paragraph({ children: [run(method, { size: SZ_NORMAL, color: COL_NOTE_BLUE })], alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0 } }),
     pageBreak(),
  
@@ -675,4 +717,4 @@ async function exportPdfData(engagementId, firmId) {
   return { fsLines, noteGroups };
 }
  
-module.exports = { exportWord, exportExcel, exportPdfData };
+module.exports = { exportWord, exportExcel, exportPdfData, exportPDFData: exportPdfData };
