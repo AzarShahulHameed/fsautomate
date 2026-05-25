@@ -4,346 +4,497 @@ const {
   Document, Packer, Paragraph, Table, TableRow, TableCell,
   TextRun, HeadingLevel, AlignmentType, PageBreak, WidthType,
   BorderStyle, ShadingType, Header, Footer, PageNumber,
-  NumberFormat, convertInchesToTwip, UnderlineType, HeightRule,
+  NumberFormat, convertInchesToTwip, UnderlineType,
+  TabStopType, TabStopPosition,
 } = require('docx');
 const { prisma } = require('../config/db');
+const { v4: uuid } = require('uuid');
+ 
+// ── Template constants (matching the illustrative FS template exactly) ─────────
+const FONT        = 'Calibri';
+const SZ_NORMAL   = 20; // 10pt
+const SZ_SMALL    = 18; // 9pt
+const SZ_TITLE    = 28; // 14pt
+const SZ_HEADING  = 22; // 11pt
+const COL_NOTE_BLUE = '4472C4'; // note number colour (blue like in template)
+const COL_SECTION = '1e293b';   // section header colour (dark)
+const COL_GREY    = '64748b';   // grey text
+ 
+// ── Column widths (DXA) — exactly matching template ──────────────────────────
+// Total A4 content width with 1" margins = 9026 DXA
+// Template BS: Particulars | Notes | gap | CY Amount | gap | PY Amount
+const COL_PART  = 4700; // Particulars
+const COL_NOTE  = 720;  // Note number
+const COL_GAP   = 250;  // spacer
+const COL_AMT1  = 1500; // Current Year
+const COL_GAPB  = 106;  // spacer
+const COL_AMT2  = 1550; // Prior Year (or comparative)
+const TOTAL_W   = COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2; // 8826
  
 // ── Number formatter ──────────────────────────────────────────────────────────
 function fmtNum(n, divisor = 1, hideZero = false) {
   const num = Number(n || 0) / divisor;
-  if (hideZero && num === 0) return ''; // hide zero rows in export
+  if (hideZero && Math.abs(num) < 0.005) return '-';
+  if (Math.abs(num) < 0.005) return '-';
   const abs = Math.abs(num);
-  const s = abs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const s = abs.toLocaleString('en-IN', { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   return num < 0 ? `(${s})` : s;
 }
  
-// ── Strip HTML tags from rich text for docx ───────────────────────────────────
 function stripHtml(html) {
   if (!html) return '';
-  return html
-    .replace(/<br\s*\/?>/gi, '\n')
-    .replace(/<\/p>/gi, '\n')
-    .replace(/<\/li>/gi, '\n')
-    .replace(/<[^>]+>/g, '')
-    .replace(/&amp;/g, '&')
-    .replace(/&lt;/g, '<')
-    .replace(/&gt;/g, '>')
-    .replace(/&nbsp;/g, ' ')
-    .replace(/&quot;/g, '"')
-    .trim();
+  return html.replace(/<br\s*\/?>/gi, '\n').replace(/<\/p>/gi, '\n')
+    .replace(/<\/li>/gi, '\n').replace(/<[^>]+>/g, '').trim();
 }
  
-// ── Parse HTML to docx paragraphs (basic) ────────────────────────────────────
-function htmlToParagraphs(html) {
-  if (!html) return [new Paragraph({ text: '' })];
-  const paras = [];
-  // Split by block-level tags
-  const blocks = html
-    .replace(/<h1[^>]*>(.*?)<\/h1>/gi, '§H1§$1§END§')
-    .replace(/<h2[^>]*>(.*?)<\/h2>/gi, '§H2§$1§END§')
-    .replace(/<h3[^>]*>(.*?)<\/h3>/gi, '§H3§$1§END§')
-    .replace(/<li[^>]*>(.*?)<\/li>/gi, '§LI§$1§END§')
-    .replace(/<p[^>]*>(.*?)<\/p>/gi, '§P§$1§END§')
-    .split('§END§');
+// ── No border (invisible cell border) ────────────────────────────────────────
+const NO_BORDER = { style: BorderStyle.NIL, size: 0, color: 'FFFFFF' };
+const NO_BORDERS = { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER };
  
-  for (const block of blocks) {
-    const text = stripHtml(block.replace(/§[A-Z0-9]+§/g, '').trim());
-    if (!text) continue;
-    if (block.includes('§H1§')) {
-      paras.push(new Paragraph({ text, heading: HeadingLevel.HEADING_1, spacing: { after: 120 } }));
-    } else if (block.includes('§H2§')) {
-      paras.push(new Paragraph({ text, heading: HeadingLevel.HEADING_2, spacing: { after: 100 } }));
-    } else if (block.includes('§H3§')) {
-      paras.push(new Paragraph({ text, heading: HeadingLevel.HEADING_3, spacing: { after: 80 } }));
-    } else if (block.includes('§LI§')) {
-      paras.push(new Paragraph({
-        text, bullet: { level: 0 },
-        spacing: { after: 60 },
-      }));
-    } else {
-      paras.push(new Paragraph({
-        children: [new TextRun({ text, size: 22 })],
-        spacing: { after: 80 },
-      }));
-    }
-  }
-  return paras.length ? paras : [new Paragraph({ text: stripHtml(html) })];
+// ── Cell border helpers ───────────────────────────────────────────────────────
+const SINGLE = { style: BorderStyle.SINGLE, size: 4, color: 'auto' };
+const DOUBLE = { style: BorderStyle.DOUBLE, size: 4, color: 'auto' };
+ 
+function cellBorders(opts = {}) {
+  return {
+    top:    opts.top    ? SINGLE : NO_BORDER,
+    bottom: opts.bottom ? (opts.double ? DOUBLE : SINGLE) : NO_BORDER,
+    left:   NO_BORDER,
+    right:  NO_BORDER,
+  };
 }
  
-// ── Helper: section title paragraph ──────────────────────────────────────────
+// ── Text run helper ───────────────────────────────────────────────────────────
+function run(text, opts = {}) {
+  return new TextRun({
+    text: String(text || ''),
+    font: FONT,
+    size: opts.size || SZ_NORMAL,
+    bold: opts.bold || false,
+    italics: opts.italics || false,
+    color: opts.color || undefined,
+  });
+}
+ 
+// ── Paragraph helper ─────────────────────────────────────────────────────────
+function para(children, opts = {}) {
+  return new Paragraph({
+    children: Array.isArray(children) ? children : [children],
+    alignment: opts.alignment || AlignmentType.LEFT,
+    spacing: { before: opts.before || 0, after: opts.after || 0 },
+    indent: opts.indent ? { left: opts.indent } : undefined,
+  });
+}
+ 
+// ── Cell helper ───────────────────────────────────────────────────────────────
+function cell(children, width, opts = {}) {
+  return new TableCell({
+    children: Array.isArray(children) ? children : [children],
+    width: { size: width, type: WidthType.DXA },
+    borders: opts.borders || NO_BORDERS,
+    verticalAlign: opts.vAlign || undefined,
+    columnSpan: opts.span || undefined,
+    shading: opts.shading || undefined,
+    margins: { top: 60, bottom: 60, left: 80, right: 80 },
+  });
+}
+ 
+// ── Page break ────────────────────────────────────────────────────────────────
+function pageBreak() {
+  return new Paragraph({ children: [new PageBreak()], spacing: { before: 0, after: 0 } });
+}
+ 
+// ── Section title (e.g. "Statement of Financial Position") ───────────────────
 function sectionTitle(text) {
   return new Paragraph({
-    children: [new TextRun({ text, bold: true, size: 28, color: '1e293b' })],
-    heading: HeadingLevel.HEADING_1,
-    spacing: { before: 200, after: 200 },
-    border: { bottom: { color: '6366f1', size: 6, space: 4, style: BorderStyle.SINGLE } },
+    children: [run(text, { bold: true, size: SZ_TITLE, color: COL_SECTION })],
+    spacing: { before: 160, after: 100 },
+    border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: COL_SECTION, space: 4 } },
   });
 }
  
-// ── Helper: page break paragraph ─────────────────────────────────────────────
-function pageBreak() {
-  return new Paragraph({ children: [new PageBreak()] });
+// ── Sub-section label (e.g. "Non-current assets") ────────────────────────────
+function sectionLabel(text) {
+  return new Paragraph({
+    children: [run(text, { bold: true, size: SZ_NORMAL })],
+    spacing: { before: 80, after: 40 },
+  });
 }
  
-// ── Helper: BS/PL table row ───────────────────────────────────────────────────
-function fsRow(label, note, amount, bold, indent, divisor) {
-  const labelRun  = new TextRun({ text: '  '.repeat(indent || 0) + label, bold: !!bold, size: 20 });
-  const noteRun   = new TextRun({ text: note ? String(note) : '', size: 20, color: '6366f1' });
-  // Return empty invisible row for zero non-bold amounts (keeps array structure intact)
-  if (amount !== null && amount !== undefined && Math.abs(Number(amount)) < 0.005 && !bold) {
-    return new TableRow({
-      children: [
-        new TableCell({ children: [new Paragraph({ text: '' })], columnSpan: 3 }),
-      ],
-      height: { value: 0, rule: HeightRule.EXACT },
-    });
-  }
-  const amtRun    = new TextRun({ text: amount !== null && amount !== undefined ? fmtNum(amount, divisor, true) : '', bold: !!bold, size: 20 });
+// ── Standard FS table row ─────────────────────────────────────────────────────
+// label | note# | gap | CY amt | gap | PY amt
+function fsRow(label, noteNum, amtCY, amtPY, opts = {}) {
+  // opts: bold, indent, subheader, subtotal, total, hideIfZero
+  if (opts.hideIfZero && Math.abs(Number(amtCY || 0)) < 0.005 && Math.abs(Number(amtPY || 0)) < 0.005) return null;
+ 
+  const isSubheader = opts.subheader;
+  const isSubtotal  = opts.subtotal;
+  const isTotal     = opts.total;
+  const isBold      = opts.bold || isSubtotal || isTotal || isSubheader;
+ 
+  // Amount border style
+  const amtBorder = isTotal
+    ? { top: SINGLE, bottom: DOUBLE, left: NO_BORDER, right: NO_BORDER }
+    : isSubtotal
+    ? { top: NO_BORDER, bottom: SINGLE, left: NO_BORDER, right: NO_BORDER }
+    : NO_BORDERS;
+ 
+  const labelText = isSubheader
+    ? run(label, { bold: true, size: SZ_NORMAL, color: COL_SECTION })
+    : run((opts.indent ? '    ' : '') + label, { bold: isBold, size: SZ_NORMAL });
+ 
+  const noteText = noteNum
+    ? run(String(noteNum), { size: SZ_SMALL, color: COL_NOTE_BLUE })
+    : run('');
+ 
+  const cy = (amtCY !== null && amtCY !== undefined) ? fmtNum(amtCY) : '';
+  const py = (amtPY !== null && amtPY !== undefined) ? fmtNum(amtPY) : '';
+ 
   return new TableRow({
     children: [
-      new TableCell({ children: [new Paragraph({ children: [labelRun] })], width: { size: 65, type: WidthType.PERCENTAGE } }),
-      new TableCell({ children: [new Paragraph({ children: [noteRun], alignment: AlignmentType.CENTER })], width: { size: 10, type: WidthType.PERCENTAGE } }),
-      new TableCell({ children: [new Paragraph({ children: [amtRun], alignment: AlignmentType.RIGHT })], width: { size: 25, type: WidthType.PERCENTAGE } }),
+      cell(para(labelText), COL_PART),
+      cell(para(noteText, { alignment: AlignmentType.CENTER }), COL_NOTE),
+      cell(para(run('')), COL_GAP),
+      cell(para(run(cy, { bold: isBold, size: SZ_NORMAL }), { alignment: AlignmentType.RIGHT }),
+        COL_AMT1, { borders: amtBorder }),
+      cell(para(run('')), COL_GAPB),
+      cell(para(run(py, { bold: isBold, size: SZ_NORMAL }), { alignment: AlignmentType.RIGHT }),
+        COL_AMT2, { borders: amtBorder }),
     ],
-    tableHeader: !!bold,
   });
 }
  
-// ── Front page ────────────────────────────────────────────────────────────────
-function buildFrontPage(engagement, frontPageContent) {
-  const info = (() => { try { return JSON.parse(frontPageContent || '{}'); } catch { return {}; } })();
-  return [
-    new Paragraph({ text: '', spacing: { after: 800 } }),
-    new Paragraph({
-      children: [new TextRun({ text: info.companyName || engagement.client?.name || 'Company Name', bold: true, size: 56, color: '1e293b' })],
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 200 },
-    }),
-    new Paragraph({
-      children: [new TextRun({ text: info.cin ? `CIN: ${info.cin}` : '', size: 22, color: '64748b' })],
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 100 },
-    }),
-    new Paragraph({
-      children: [new TextRun({ text: info.address || '', size: 22, color: '64748b' })],
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 600 },
-    }),
-    new Paragraph({
-      children: [new TextRun({ text: 'ANNUAL REPORT', bold: true, size: 40, color: '6366f1' })],
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 200 },
-    }),
-    new Paragraph({
-      children: [new TextRun({ text: `Financial Year ${engagement.financialYear}`, size: 28, color: '475569' })],
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 600 },
-    }),
-    new Paragraph({
-      children: [new TextRun({ text: `Method: ${engagement.method}`, size: 22, color: '94a3b8' })],
-      alignment: AlignmentType.CENTER,
-      spacing: { after: 100 },
-    }),
-    info.auditorName ? new Paragraph({
-      children: [new TextRun({ text: `Statutory Auditors: ${info.auditorName}`, size: 22, color: '94a3b8' })],
-      alignment: AlignmentType.CENTER,
-    }) : new Paragraph({ text: '' }),
-    pageBreak(),
-  ];
+// ── FS Table wrapper ──────────────────────────────────────────────────────────
+function fsTable(rows) {
+  const validRows = rows.filter(Boolean);
+  if (!validRows.length) return null;
+  return new Table({
+    width: { size: TOTAL_W, type: WidthType.DXA },
+    columnWidths: [COL_PART, COL_NOTE, COL_GAP, COL_AMT1, COL_GAPB, COL_AMT2],
+    borders: { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER, insideH: NO_BORDER, insideV: NO_BORDER },
+    rows: validRows,
+  });
 }
  
-// ── TOC ───────────────────────────────────────────────────────────────────────
-function buildTOC(sections) {
-  const rows = sections
-    .filter(s => s.isVisible)
-    .map((s, i) => new TableRow({
+// ── Table header row (year columns) ──────────────────────────────────────────
+function tableHeaderRow(cy, py, currency) {
+  return [
+    new TableRow({
       children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: s.title, size: 22 })] })], width: { size: 80, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } } }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: String(i + 1), size: 22 })], alignment: AlignmentType.RIGHT })], width: { size: 20, type: WidthType.PERCENTAGE }, borders: { top: { style: BorderStyle.NONE }, bottom: { style: BorderStyle.NONE }, left: { style: BorderStyle.NONE }, right: { style: BorderStyle.NONE } } }),
-      ],
-    }));
- 
-  return [
-    sectionTitle('Table of Contents'),
-    new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } }),
-    pageBreak(),
-  ];
-}
- 
-// ── BS in Word ────────────────────────────────────────────────────────────────
-function buildBS(fsLines, divisor, method) {
-  const lines = fsLines || [];
-  const g = (kw) => lines.filter(l => kw.some(k => l.groupName?.toLowerCase().includes(k.toLowerCase()))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
-  const n = (kw) => lines.find(l => kw.some(k => l.groupName?.toLowerCase().includes(k.toLowerCase())))?.noteGroup?.noteNumber;
- 
-  const sc=g(['share capital']), res=g(['r&s','reserves and surplus','retained earnings']), sfT=sc+res;
-  const ltB=g(['long term borrowings','non-current borrowings']), dtl=g(['deferred tax liability']), oltl=g(['other long term liabilities']), ltp=g(['long term provisions']), ncLT=ltB+dtl+oltl+ltp;
-  const stB=g(['short-term borrowings','short term borrowings']), tp=g(['trade payables']), ocl=g(['other current liabilities']), stp=g(['short term provisions']), clT=stB+tp+ocl+stp;
-  const totEL=sfT+ncLT+clT;
-  const fa=g(['fixed assets','property, plant','ppe','tangible','intangible','cwip']), nci=g(['non current investments']), dta=g(['deferred tax asset']), ltl=g(['long term loans']), onca=g(['other non-current assets']), ncaT=fa+nci+dta+ltl+onca;
-  const ci=g(['current investments']), inv=g(['inventories','stock']), tr=g(['trade receivables','debtors']), cash=g(['cash']), stl=g(['short-term loans']), oca=g(['other current assets']), caT=ci+inv+tr+cash+stl+oca;
-  const totA=ncaT+caT;
-  const D=divisor;
- 
-  const hdr = (txt) => new TableRow({ children: [new TableCell({ children: [new Paragraph({ children:[new TextRun({text:txt,bold:true,size:20,color:'ffffff'})], shading:{type:ShadingType.SOLID,color:'1e293b',fill:'1e293b'} })], columnSpan:3 })], tableHeader: true });
-  const subhdr = (txt) => new TableRow({ children: [new TableCell({ children: [new Paragraph({ children:[new TextRun({text:txt,bold:true,size:18,color:'475569'})], shading:{type:ShadingType.SOLID,color:'f1f5f9',fill:'f1f5f9'} })], columnSpan:3 })] });
- 
-  return [
-    sectionTitle(method === 'IFRS' || method === 'IFRS_SME' ? 'Statement of Financial Position' : 'Balance Sheet'),
-    new Paragraph({ children:[new TextRun({text:'as at 31st March',size:20,color:'64748b'})], alignment:AlignmentType.CENTER, spacing:{after:160} }),
-    new Table({
-      width:{size:100,type:WidthType.PERCENTAGE},
-      rows:[
-        new TableRow({tableHeader:true, children:[
-          new TableCell({children:[new Paragraph({children:[new TextRun({text:'Particulars',bold:true,size:22,color:'ffffff'})],shading:{type:ShadingType.SOLID,color:'1e293b',fill:'1e293b'}})], width:{size:65,type:WidthType.PERCENTAGE}}),
-          new TableCell({children:[new Paragraph({children:[new TextRun({text:'Note',bold:true,size:22,color:'ffffff'})],alignment:AlignmentType.CENTER,shading:{type:ShadingType.SOLID,color:'1e293b',fill:'1e293b'}})], width:{size:10,type:WidthType.PERCENTAGE}}),
-          new TableCell({children:[new Paragraph({children:[new TextRun({text:'Amount',bold:true,size:22,color:'ffffff'})],alignment:AlignmentType.RIGHT,shading:{type:ShadingType.SOLID,color:'1e293b',fill:'1e293b'}})], width:{size:25,type:WidthType.PERCENTAGE}}),
-        ]}),
-        hdr('I. EQUITY AND LIABILITIES'),
-        subhdr("(1) Shareholders' Funds"),
-        fsRow('Share Capital',n(['share capital']),sc,false,2,D),
-        fsRow('Reserves and Surplus',n(['r&s','reserves']),res,false,2,D),
-        fsRow("Sub-total — Shareholders' Funds",null,sfT,true,0,D),
-        subhdr('(2) Non-Current Liabilities'),
-        fsRow('Long-Term Borrowings',n(['long term borrowings']),ltB,false,2,D),
-        fsRow('Deferred Tax Liabilities (Net)',n(['deferred tax liability']),dtl,false,2,D),
-        fsRow('Other Long-Term Liabilities',n(['other long term liabilities']),oltl,false,2,D),
-        fsRow('Long-Term Provisions',n(['long term provisions']),ltp,false,2,D),
-        fsRow('Sub-total — Non-Current Liabilities',null,ncLT,true,0,D),
-        subhdr('(3) Current Liabilities'),
-        fsRow('Short-Term Borrowings',n(['short-term borrowings']),stB,false,2,D),
-        fsRow('Trade Payables',n(['trade payables']),tp,false,2,D),
-        fsRow('Other Current Liabilities',n(['other current liabilities']),ocl,false,2,D),
-        fsRow('Short-Term Provisions',n(['short term provisions']),stp,false,2,D),
-        fsRow('Sub-total — Current Liabilities',null,clT,true,0,D),
-        fsRow('TOTAL — EQUITY AND LIABILITIES',null,totEL,true,0,D),
-        hdr('II. ASSETS'),
-        subhdr('(1) Non-Current Assets'),
-        fsRow('Fixed Assets',n(['fixed assets','ppe','tangible']),fa,false,2,D),
-        fsRow('Non-Current Investments',n(['non current investments']),nci,false,2,D),
-        fsRow('Deferred Tax Assets (Net)',n(['deferred tax asset']),dta,false,2,D),
-        fsRow('Long-Term Loans and Advances',n(['long term loans']),ltl,false,2,D),
-        fsRow('Other Non-Current Assets',null,onca,false,2,D),
-        fsRow('Sub-total — Non-Current Assets',null,ncaT,true,0,D),
-        subhdr('(2) Current Assets'),
-        fsRow('Inventories',n(['inventories','stock']),inv,false,2,D),
-        fsRow('Trade Receivables',n(['trade receivables','debtors']),tr,false,2,D),
-        fsRow('Current Investments',n(['current investments']),ci,false,2,D),
-        fsRow('Cash and Bank Balances',n(['cash']),cash,false,2,D),
-        fsRow('Short-Term Loans and Advances',n(['short-term loans']),stl,false,2,D),
-        fsRow('Other Current Assets',n(['other current assets']),oca,false,2,D),
-        fsRow('Sub-total — Current Assets',null,caT,true,0,D),
-        fsRow('TOTAL — ASSETS',null,totA,true,0,D),
+        cell(para(run('')), COL_PART),
+        cell(para(run('')), COL_NOTE),
+        cell(para(run('')), COL_GAP),
+        cell(para(run(cy,  { bold: true }), { alignment: AlignmentType.RIGHT }), COL_AMT1),
+        cell(para(run('')), COL_GAPB),
+        cell(para(run(py,  { bold: true }), { alignment: AlignmentType.RIGHT }), COL_AMT2),
       ],
     }),
-    pageBreak(),
-  ];
-}
- 
-// ── P&L in Word ───────────────────────────────────────────────────────────────
-function buildPL(plLines, divisor, method) {
-  const lines = plLines || [];
-  const g=(kw)=>lines.filter(l=>kw.some(k=>l.groupName?.toLowerCase().includes(k.toLowerCase()))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
-  const n=(kw)=>lines.find(l=>kw.some(k=>l.groupName?.toLowerCase().includes(k.toLowerCase())))?.noteGroup?.noteNumber;
-  const D=divisor;
-  const rev=g(['revenue from operations','revenue from contracts','turnover']), oi=g(['other income']), totRev=rev+oi;
-  const mat=g(['cost of materials','material cost','purchases of stock','cost of sales','cost of goods']), emp=g(['employee','salary','wages']), fin=g(['finance cost','interest expense']), dep=g(['depreciation','amortisation','amortization']), oe=g(['other expenses']), totExp=mat+emp+fin+dep+oe;
-  const ebit=totRev-totExp, exc=g(['exceptional']), pbt=ebit-exc, tax=g(['tax expense','tax expense:']), pat=pbt-tax;
- 
-  return [
-    sectionTitle(method==='IFRS'||method==='IFRS_SME'?'Statement of Comprehensive Income':'Statement of Profit and Loss'),
-    new Paragraph({children:[new TextRun({text:'for the year ended 31st March',size:20,color:'64748b'})],alignment:AlignmentType.CENTER,spacing:{after:160}}),
-    new Table({
-      width:{size:100,type:WidthType.PERCENTAGE},
-      rows:[
-        new TableRow({tableHeader:true,children:[
-          new TableCell({children:[new Paragraph({children:[new TextRun({text:'Particulars',bold:true,size:22,color:'ffffff'})],shading:{type:ShadingType.SOLID,color:'1e293b',fill:'1e293b'}})],width:{size:65,type:WidthType.PERCENTAGE}}),
-          new TableCell({children:[new Paragraph({children:[new TextRun({text:'Note',bold:true,size:22,color:'ffffff'})],alignment:AlignmentType.CENTER,shading:{type:ShadingType.SOLID,color:'1e293b',fill:'1e293b'}})],width:{size:10,type:WidthType.PERCENTAGE}}),
-          new TableCell({children:[new Paragraph({children:[new TextRun({text:'Amount',bold:true,size:22,color:'ffffff'})],alignment:AlignmentType.RIGHT,shading:{type:ShadingType.SOLID,color:'1e293b',fill:'1e293b'}})],width:{size:25,type:WidthType.PERCENTAGE}}),
-        ]}),
-        fsRow('I. REVENUE',null,null,true,0,D),
-        fsRow('Revenue from Operations',n(['revenue from operations','turnover']),rev,false,2,D),
-        fsRow('Other Income',n(['other income']),oi,false,2,D),
-        fsRow('Total Revenue (I)',null,totRev,true,0,D),
-        fsRow('II. EXPENSES',null,null,true,0,D),
-        fsRow('Cost of Materials / Purchases',n(['cost of material','purchases']),mat,false,2,D),
-        fsRow('Employee Benefit Expenses',n(['employee']),emp,false,2,D),
-        fsRow('Finance Costs',n(['finance cost']),fin,false,2,D),
-        fsRow('Depreciation and Amortisation',n(['depreciation']),dep,false,2,D),
-        fsRow('Other Expenses',n(['other expenses']),oe,false,2,D),
-        fsRow('Total Expenses (II)',null,totExp,true,0,D),
-        fsRow('Profit Before Exceptional Items and Tax',null,ebit,true,0,D),
-        ...(exc!==0?[fsRow('Exceptional Items',n(['exceptional']),exc,false,2,D)]:[] ),
-        fsRow('Profit Before Tax',null,pbt,true,0,D),
-        fsRow('III. TAX EXPENSE',null,null,true,0,D),
-        fsRow('Current Tax',null,tax*0.8,false,2,D),
-        fsRow('Deferred Tax',null,tax*0.2,false,2,D),
-        fsRow('Total Tax Expense',null,tax,true,0,D),
-        fsRow('Profit / (Loss) for the Year',null,pat,true,0,D),
+    new TableRow({
+      children: [
+        cell(para(run('', { bold: true, size: SZ_SMALL })), COL_PART),
+        cell(para(run('Notes', { bold: true, size: SZ_SMALL, color: COL_NOTE_BLUE }), { alignment: AlignmentType.CENTER }), COL_NOTE),
+        cell(para(run('')), COL_GAP),
+        cell(para(run(currency, { bold: true, size: SZ_SMALL }), { alignment: AlignmentType.RIGHT }), COL_AMT1,
+          { borders: { top: NO_BORDER, bottom: SINGLE, left: NO_BORDER, right: NO_BORDER } }),
+        cell(para(run('')), COL_GAPB),
+        cell(para(run(currency, { bold: true, size: SZ_SMALL }), { alignment: AlignmentType.RIGHT }), COL_AMT2,
+          { borders: { top: NO_BORDER, bottom: SINGLE, left: NO_BORDER, right: NO_BORDER } }),
       ],
     }),
+  ];
+}
+ 
+// ── Helper: look up amount from fsLines ──────────────────────────────────────
+function amt(lines, ...keywords) {
+  const kw = keywords.map(k => k.toLowerCase());
+  const match = lines.find(l => kw.some(k => (l.groupName || '').toLowerCase().includes(k)));
+  return match ? Number(match.totalFinalNet || 0) : null;
+}
+function note(lines, ...keywords) {
+  const kw = keywords.map(k => k.toLowerCase());
+  const match = lines.find(l => kw.some(k => (l.groupName || '').toLowerCase().includes(k)));
+  return match?.noteGroup?.noteNumber || null;
+}
+function sumAmt(lines, ...keywords) {
+  const kw = keywords.map(k => k.toLowerCase());
+  return lines
+    .filter(l => kw.some(k => (l.groupName || '').toLowerCase().includes(k)))
+    .reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+}
+ 
+// ── Build BS ──────────────────────────────────────────────────────────────────
+function buildBS(lines, engagement, currency, fyLabel) {
+  const isIFRS = ['IFRS', 'IFRS_SME'].includes(engagement.method);
+  const title  = isIFRS ? 'Statement of Financial Position' : 'Balance Sheet';
+  const cyYear = fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel;
+  const pyYear = String(Number(cyYear) - 1);
+ 
+  // Group all lines by category
+  const bsLines = lines.filter(l => l.sheet === 'BS');
+ 
+  // Build rows dynamically from actual mapped data
+  const rows = [
+    ...tableHeaderRow(cyYear, pyYear, currency),
+  ];
+ 
+  // ASSETS section
+  rows.push(new TableRow({ children: [
+    cell(para(run('ASSETS', { bold: true, size: SZ_NORMAL, color: COL_SECTION })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2, { span: 6 }),
+  ]}));
+ 
+  // Non-current assets
+  const ncaLines = bsLines.filter(l => ['ppe','plant','equipment','intangible','goodwill','investment','deferred tax asset','right of use','biological','non-current'].some(k => l.groupName.toLowerCase().includes(k)));
+  if (ncaLines.length) {
+    rows.push(new TableRow({ children: [cell(para(run('Non-current assets', { bold: true })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    ncaLines.forEach(l => {
+      const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
+      if (r) rows.push(r);
+    });
+    const ncaTotal = ncaLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+    rows.push(fsRow('Total non-current assets', null, ncaTotal, null, { subtotal: true }));
+  }
+ 
+  // Current assets
+  const caLines = bsLines.filter(l => ['inventory','inventories','receivable','cash','bank','prepaid','current','trade receivable','advance','tax asset'].some(k => l.groupName.toLowerCase().includes(k)) && !l.groupName.toLowerCase().includes('non-current'));
+  if (caLines.length) {
+    rows.push(new TableRow({ children: [cell(para(run('Current assets', { bold: true })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    caLines.forEach(l => {
+      const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
+      if (r) rows.push(r);
+    });
+    const caTotal = caLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+    rows.push(fsRow('Total current assets', null, caTotal, null, { subtotal: true }));
+  }
+ 
+  const allAssets = bsLines.filter(l => ['Assets','asset'].some(k => (l.assetLiability || '').includes(k)));
+  const totalAssets = allAssets.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+  rows.push(fsRow('TOTAL ASSETS', null, totalAssets, null, { total: true }));
+ 
+  // EQUITY AND LIABILITIES
+  rows.push(new TableRow({ children: [
+    cell(para(run('EQUITY AND LIABILITIES', { bold: true, color: COL_SECTION })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2),
+  ]}));
+ 
+  const eqLines = bsLines.filter(l => l.assetLiability === 'Equity');
+  if (eqLines.length) {
+    rows.push(new TableRow({ children: [cell(para(run('Equity', { bold: true })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    eqLines.forEach(l => {
+      const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
+      if (r) rows.push(r);
+    });
+    const eqTotal = eqLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+    rows.push(fsRow('Total equity', null, eqTotal, null, { subtotal: true }));
+  }
+ 
+  const nclLines = bsLines.filter(l => l.assetLiability === 'Liabilities' && ['long term','non-current','deferred tax liab','lease'].some(k => l.groupName.toLowerCase().includes(k)));
+  if (nclLines.length) {
+    rows.push(new TableRow({ children: [cell(para(run('Non-current liabilities', { bold: true })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    nclLines.forEach(l => {
+      const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
+      if (r) rows.push(r);
+    });
+    const nclTotal = nclLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+    rows.push(fsRow('Total non-current liabilities', null, nclTotal, null, { subtotal: true }));
+  }
+ 
+  const clLines = bsLines.filter(l => l.assetLiability === 'Liabilities' && !['long term','non-current','deferred tax liab','lease'].some(k => l.groupName.toLowerCase().includes(k)));
+  if (clLines.length) {
+    rows.push(new TableRow({ children: [cell(para(run('Current liabilities', { bold: true })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    clLines.forEach(l => {
+      const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
+      if (r) rows.push(r);
+    });
+    const clTotal = clLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+    rows.push(fsRow('Total current liabilities', null, clTotal, null, { subtotal: true }));
+  }
+ 
+  const allLiabEq = bsLines.filter(l => l.assetLiability === 'Liabilities' || l.assetLiability === 'Equity');
+  const totalEqLiab = allLiabEq.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+  rows.push(fsRow('TOTAL EQUITY AND LIABILITIES', null, totalEqLiab, null, { total: true }));
+ 
+  return [
+    sectionTitle(title),
+    new Paragraph({ children: [run(`As at ${isIFRS ? '31 December' : '31 March'} ${cyYear}`, { size: SZ_SMALL, color: COL_GREY, italics: true })], spacing: { before: 60, after: 120 } }),
+    new Paragraph({ children: [run(`All amounts in ${currency} unless otherwise stated`, { size: SZ_SMALL, color: COL_GREY, italics: true })], spacing: { before: 0, after: 120 } }),
+    fsTable(rows),
     pageBreak(),
   ];
 }
  
-// ── Notes in Word ─────────────────────────────────────────────────────────────
-function buildNotes(noteGroups, divisor) {
-  const D = divisor;
-  const sections = [sectionTitle('Notes to Financial Statements')];
+// ── Build P&L ─────────────────────────────────────────────────────────────────
+function buildPL(lines, engagement, currency, fyLabel) {
+  const isIFRS = ['IFRS', 'IFRS_SME'].includes(engagement.method);
+  const title  = isIFRS ? 'Statement of Profit or Loss' : 'Statement of Profit and Loss';
+  const cyYear = fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel;
+  const pyYear = String(Number(cyYear) - 1);
+  const plLines = lines.filter(l => l.sheet === 'PL');
+ 
+  const rows = [...tableHeaderRow(`Year ended\n${cyYear}`, `Year ended\n${pyYear}`, currency)];
+ 
+  const incomeLines = plLines.filter(l => l.assetLiability === 'Income');
+  const expenseLines = plLines.filter(l => l.assetLiability === 'Expenses');
+ 
+  if (incomeLines.length) {
+    rows.push(new TableRow({ children: [cell(para(run('Revenue and other income', { bold: true, color: COL_SECTION })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    incomeLines.forEach(l => {
+      const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
+      if (r) rows.push(r);
+    });
+    const incTotal = incomeLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+    rows.push(fsRow('Total revenue', null, incTotal, null, { subtotal: true }));
+  }
+ 
+  if (expenseLines.length) {
+    rows.push(new TableRow({ children: [cell(para(run('Expenses', { bold: true, color: COL_SECTION })), COL_PART + COL_NOTE + COL_GAP + COL_AMT1 + COL_GAPB + COL_AMT2)] }));
+    expenseLines.forEach(l => {
+      const r = fsRow(l.groupName, l.noteGroup?.noteNumber, Number(l.totalFinalNet), null, { hideIfZero: true });
+      if (r) rows.push(r);
+    });
+    const expTotal = expenseLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+    rows.push(fsRow('Total expenses', null, expTotal, null, { subtotal: true }));
+  }
+ 
+  const incTotal = incomeLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+  const expTotal = expenseLines.reduce((s, l) => s + Number(l.totalFinalNet || 0), 0);
+  rows.push(fsRow('Profit / (Loss) for the year', null, incTotal - expTotal, null, { total: true }));
+ 
+  return [
+    sectionTitle(title),
+    new Paragraph({ children: [run(`For the year ended ${isIFRS ? '31 December' : '31 March'} ${cyYear}`, { size: SZ_SMALL, color: COL_GREY, italics: true })], spacing: { before: 60, after: 120 } }),
+    new Paragraph({ children: [run(`All amounts in ${currency} unless otherwise stated`, { size: SZ_SMALL, color: COL_GREY, italics: true })], spacing: { before: 0, after: 120 } }),
+    fsTable(rows),
+    pageBreak(),
+  ];
+}
+ 
+// ── Build Notes ───────────────────────────────────────────────────────────────
+function buildNotes(noteGroups, currency) {
+  const sections = [
+    sectionTitle('Notes to the Financial Statements'),
+    new Paragraph({ children: [run(`All amounts in ${currency} unless otherwise stated`, { size: SZ_SMALL, color: COL_GREY, italics: true })], spacing: { before: 60, after: 160 } }),
+  ];
  
   for (const note of noteGroups) {
-    // Skip notes where total is zero
     if (Math.abs(Number(note.total)) < 0.005) continue;
  
+    // Note heading
     sections.push(new Paragraph({
-      children: [new TextRun({ text: `Note ${note.noteNumber} — ${note.title}`, bold: true, size: 24, color: '4f46e5' })],
-      spacing: { before: 200, after: 100 },
+      children: [
+        run(`${note.noteNumber}. `, { bold: true, size: SZ_HEADING, color: COL_NOTE_BLUE }),
+        run(note.title, { bold: true, size: SZ_HEADING, color: COL_SECTION }),
+      ],
+      spacing: { before: 200, after: 80 },
     }));
  
-    const rows = [
-      new TableRow({ tableHeader: true, children: [
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Particulars', bold: true, size: 20, color: 'ffffff' })], shading: { type: ShadingType.SOLID, color: '334155', fill: '334155' } })], width: { size: 75, type: WidthType.PERCENTAGE } }),
-        new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: 'Amount', bold: true, size: 20, color: 'ffffff' })], alignment: AlignmentType.RIGHT, shading: { type: ShadingType.SOLID, color: '334155', fill: '334155' } })], width: { size: 25, type: WidthType.PERCENTAGE } }),
+    // Note table: Particulars | CY | PY
+    const noteColPart = 5500;
+    const noteColAmt  = 1663;
+    const noteTotalW  = noteColPart + noteColAmt + noteColAmt;
+ 
+    const noteRows = [
+      // Header row
+      new TableRow({ children: [
+        cell(para(run('Particulars', { bold: true, size: SZ_SMALL })), noteColPart),
+        cell(para(run(currency, { bold: true, size: SZ_SMALL }), { alignment: AlignmentType.RIGHT }), noteColAmt,
+          { borders: { top: NO_BORDER, bottom: SINGLE, left: NO_BORDER, right: NO_BORDER } }),
+        cell(para(run(''), { alignment: AlignmentType.RIGHT }), noteColAmt),
       ]}),
     ];
  
-    // Export: show ONLY group heading (subGroupName) + subtotal — NO ledger rows
-    if (note.subGroups && note.subGroups.length > 0) {
-      for (const sg of note.subGroups) {
-        // Skip zero subtotal subgroups
-        if (Math.abs(Number(sg.subtotal)) < 0.005) continue;
- 
-        if (note.subGroups.filter(s => Math.abs(Number(s.subtotal)) >= 0.005).length > 1) {
-          // Show subgroup heading + subtotal as a row
-          rows.push(new TableRow({ children: [
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: sg.subGroupName, size: 18 })] })], width: { size: 75, type: WidthType.PERCENTAGE } }),
-            new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: fmtNum(sg.subtotal, D, true), size: 18 })], alignment: AlignmentType.RIGHT })], width: { size: 25, type: WidthType.PERCENTAGE } }),
-          ]}));
-        }
-      }
+    // Only subGroupName + subtotal (no ledger detail in export)
+    const visibleSGs = (note.subGroups || []).filter(sg => Math.abs(Number(sg.subtotal)) >= 0.005);
+    for (const sg of visibleSGs) {
+      noteRows.push(new TableRow({ children: [
+        cell(para(run(sg.subGroupName, { size: SZ_NORMAL })), noteColPart),
+        cell(para(run(fmtNum(sg.subtotal), { size: SZ_NORMAL }), { alignment: AlignmentType.RIGHT }), noteColAmt),
+        cell(para(run(''), { alignment: AlignmentType.RIGHT }), noteColAmt),
+      ]}));
     }
  
-    // Total row — always show
-    rows.push(new TableRow({ children: [
-      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: `Total — ${note.title}`, bold: true, size: 20 })], shading: { type: ShadingType.SOLID, color: 'e0e7ff', fill: 'e0e7ff' } })], width: { size: 75, type: WidthType.PERCENTAGE } }),
-      new TableCell({ children: [new Paragraph({ children: [new TextRun({ text: fmtNum(note.total, D, true), bold: true, size: 20 })], alignment: AlignmentType.RIGHT, shading: { type: ShadingType.SOLID, color: 'e0e7ff', fill: 'e0e7ff' } })], width: { size: 25, type: WidthType.PERCENTAGE } }),
+    // Total row
+    noteRows.push(new TableRow({ children: [
+      cell(para(run(`Total — ${note.title}`, { bold: true, size: SZ_NORMAL })), noteColPart),
+      cell(para(run(fmtNum(note.total), { bold: true, size: SZ_NORMAL }), { alignment: AlignmentType.RIGHT }), noteColAmt,
+        { borders: { top: SINGLE, bottom: DOUBLE, left: NO_BORDER, right: NO_BORDER } }),
+      cell(para(run(''), { alignment: AlignmentType.RIGHT }), noteColAmt),
     ]}));
  
-    sections.push(new Table({ rows, width: { size: 100, type: WidthType.PERCENTAGE } }));
-    sections.push(new Paragraph({ text: '', spacing: { after: 160 } }));
+    sections.push(new Table({
+      width: { size: noteTotalW, type: WidthType.DXA },
+      columnWidths: [noteColPart, noteColAmt, noteColAmt],
+      borders: { top: NO_BORDER, bottom: NO_BORDER, left: NO_BORDER, right: NO_BORDER, insideH: NO_BORDER, insideV: NO_BORDER },
+      rows: noteRows,
+    }));
+    sections.push(new Paragraph({ text: '', spacing: { after: 120 } }));
   }
  
-  sections.push(pageBreak());
   return sections;
+}
+ 
+// ── Collapse note details into subgroups ──────────────────────────────────────
+function collapseNotes(noteDetails) {
+  const groups = new Map();
+  for (const d of noteDetails) {
+    const key = d.subGroupName || 'Other';
+    if (!groups.has(key)) groups.set(key, { subGroupName: key, rows: [], subtotal: 0 });
+    groups.get(key).rows.push(d);
+    groups.get(key).subtotal += Number(d.finalNet || 0);
+  }
+  return Array.from(groups.values());
+}
+ 
+// ── Header builder ────────────────────────────────────────────────────────────
+function buildHeader(engagement, firmName) {
+  const clientName = engagement.client?.name || '';
+  const method     = engagement.method || 'IFRS';
+  const fyLabel    = engagement.financialYear || '';
+  const isIFRS     = ['IFRS', 'IFRS_SME'].includes(method);
+  const cyYear     = fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel;
+  const closingDate = isIFRS ? `31 December ${cyYear}` : `31 March ${cyYear}`;
+ 
+  return new Header({
+    children: [
+      new Paragraph({
+        children: [run(clientName.toUpperCase(), { bold: true, size: SZ_HEADING, color: COL_SECTION })],
+        border: { bottom: { style: BorderStyle.SINGLE, size: 6, color: COL_SECTION, space: 4 } },
+        spacing: { before: 0, after: 60 },
+      }),
+      new Paragraph({
+        children: [run(`Financial statements for the year ended ${closingDate}`, { size: SZ_SMALL, color: COL_GREY, italics: true })],
+        spacing: { before: 40, after: 0 },
+      }),
+    ],
+  });
+}
+ 
+// ── Footer builder ────────────────────────────────────────────────────────────
+function buildFooter(firmName) {
+  return new Footer({
+    children: [
+      new Paragraph({
+        children: [
+          run(firmName || 'FinStatement', { size: SZ_SMALL, color: COL_GREY }),
+          new TextRun({ text: '\t', size: SZ_SMALL }),
+          run('Page ', { size: SZ_SMALL, color: COL_GREY }),
+          new PageNumber({ size: SZ_SMALL, color: COL_GREY }),
+        ],
+        tabStops: [{ type: TabStopType.RIGHT, position: TOTAL_W }],
+        border: { top: { style: BorderStyle.SINGLE, size: 4, color: 'cbd5e1', space: 4 } },
+        spacing: { before: 60, after: 0 },
+      }),
+    ],
+  });
 }
  
 // ── MAIN EXPORT FUNCTION ──────────────────────────────────────────────────────
 async function exportWord(engagementId, firmId) {
-  // Raw SQL - avoids broken Prisma relation after db pull
   const engRows = await prisma.$queryRawUnsafe(
     `SELECT e.*, c.name as "clientName", c.cin, c.pan, c.gstin,
-            c."tradeLicense", c."vatNumber", c.region as "clientRegion"
-     FROM "Engagement" e JOIN "Client" c ON c.id = e."clientId"
+            c."tradeLicense", c."vatNumber", c.region as "clientRegion",
+            f.name as "firmName"
+     FROM "Engagement" e
+     JOIN "Client" c ON c.id = e."clientId"
+     JOIN "Firm" f ON f.id = c."firmId"
      WHERE e.id = $1 AND c."firmId" = $2 LIMIT 1`,
     engagementId, firmId
   );
@@ -356,134 +507,72 @@ async function exportWord(engagementId, firmId) {
               vatNumber: engRow.vatNumber, region: engRow.clientRegion },
   };
  
-  const [sections, _rawWordFsLines, noteGroups] = await Promise.all([
-    prisma.reportSection.findMany({
-      where: { engagementId },
-      orderBy: { displayOrder: 'asc' },
-    }),
-    prisma.fSLine.findMany({
-      where: { engagementId },
-      orderBy: { displayOrder: 'asc' },
-    }),
+  const method   = engagement.method || 'IFRS';
+  const isIFRS   = ['IFRS', 'IFRS_SME'].includes(method);
+  const currency = (method === 'IFRS' || method === 'IFRS_SME') ? 'AED' : '₹';
+  const fyLabel  = engagement.financialYear || '';
+ 
+  const [rawFsLines, noteGroups] = await Promise.all([
+    prisma.fSLine.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } }),
     prisma.noteGroup.findMany({
       where: { engagementId },
       orderBy: { noteNumber: 'asc' },
-      include: {
-        noteDetails: { orderBy: [{ subGroupNo: 'asc' }, { displayOrder: 'asc' }] },
-      },
+      include: { noteDetails: { orderBy: { displayOrder: 'asc' } } },
     }),
   ]);
  
-  // Join FSLines with NoteGroups (no Prisma relation after db pull)
-  const _ngByGroupId = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
-  const fsLines = _rawWordFsLines.map(l => ({
+  // Join FSLines with NoteGroups
+  const ngMap = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
+  const fsLines = rawFsLines.map(l => ({
     ...l,
-    noteGroup: l.noteGroupId ? _ngByGroupId.get(l.noteGroupId) || null : null,
+    noteGroup: l.noteGroupId ? ngMap.get(l.noteGroupId) || null : null,
   }));
- 
-  const D = 1; // Actual amounts in Word export
- 
-  const bsLines  = fsLines.filter(l => l.sheet === 'BS' && !l.groupName?.startsWith('__'));
-  const plLines  = fsLines.filter(l => l.sheet === 'PL' && !l.groupName?.startsWith('__'));
  
   // Structure notes
   const structuredNotes = noteGroups
-    .filter(ng => !ng.noteGroupId?.startsWith('__') && !ng.title?.startsWith('__'))
+    .filter(ng => !ng.noteGroupId?.startsWith('__'))
     .map(ng => ({
       noteNumber: ng.noteNumber,
       title: ng.title,
-      total: ng.noteDetails.reduce((s,d)=>s+Number(d.finalNet),0),
+      total: ng.noteDetails.reduce((s, d) => s + Number(d.finalNet || 0), 0),
       subGroups: collapseNotes(ng.noteDetails),
     }));
  
-  // Get section content map
-  const sectionMap = {};
-  for (const s of sections) { sectionMap[s.sectionType] = s; }
+  // Build all sections
+  const children = [
+    // Cover page
+    new Paragraph({ children: [run(engRow.clientName || '', { bold: true, size: 48, color: COL_SECTION })], alignment: AlignmentType.CENTER, spacing: { before: 2000, after: 200 } }),
+    new Paragraph({ children: [run('Financial Statements', { bold: true, size: 36, color: COL_GREY })], alignment: AlignmentType.CENTER, spacing: { before: 0, after: 200 } }),
+    new Paragraph({ children: [run(`For the year ended ${isIFRS ? '31 December' : '31 March'} ${fyLabel.split('-')[1] ? '20' + fyLabel.split('-')[1] : fyLabel}`, { size: SZ_HEADING, color: COL_GREY })], alignment: AlignmentType.CENTER, spacing: { before: 0, after: 200 } }),
+    new Paragraph({ children: [run(method, { size: SZ_NORMAL, color: COL_NOTE_BLUE })], alignment: AlignmentType.CENTER, spacing: { before: 0, after: 0 } }),
+    pageBreak(),
  
-  // Build document children in order
-  const children = [];
-  const visibleSections = sections.filter(s => s.isVisible).sort((a,b)=>a.displayOrder-b.displayOrder);
+    // Balance Sheet
+    ...buildBS(fsLines, engagement, currency, fyLabel),
  
-  for (const section of visibleSections) {
-    switch (section.sectionType) {
-      case 'FIRST_PAGE':
-        children.push(...buildFrontPage(engagement, section.content));
-        break;
+    // P&L
+    ...buildPL(fsLines, engagement, currency, fyLabel),
  
-      case 'TABLE_OF_CONTENTS':
-        children.push(...buildTOC(visibleSections));
-        break;
+    // Notes
+    ...buildNotes(structuredNotes, currency),
+  ];
  
-      case 'DIRECTOR_REPORT':
-        children.push(sectionTitle(section.title));
-        children.push(...htmlToParagraphs(section.content));
-        children.push(pageBreak());
-        break;
- 
-      case 'AUDITOR_REPORT':
-        children.push(sectionTitle(section.title));
-        children.push(...htmlToParagraphs(section.content));
-        children.push(pageBreak());
-        break;
- 
-      case 'FINANCIAL_STATEMENTS':
-        children.push(sectionTitle('Financial Statements'));
-        children.push(...buildBS(bsLines, D, engagement.method));
-        children.push(...buildPL(plLines, D, engagement.method));
-        break;
- 
-      case 'ACCOUNTING_POLICY':
-        children.push(sectionTitle(section.title));
-        children.push(...htmlToParagraphs(section.content));
-        children.push(pageBreak());
-        break;
- 
-      case 'SUGGESTIONS':
-        children.push(sectionTitle(section.title));
-        children.push(...htmlToParagraphs(section.content));
-        children.push(pageBreak());
-        break;
- 
-      case 'NOTES':
-        children.push(...buildNotes(structuredNotes, D));
-        break;
- 
-      case 'THANK_YOU':
-        children.push(new Paragraph({ text: '', spacing: { after: 1200 } }));
-        children.push(new Paragraph({
-          children: [new TextRun({ text: section.content ? stripHtml(section.content) : 'Thank You', bold: true, size: 48, color: '6366f1' })],
-          alignment: AlignmentType.CENTER,
-          spacing: { after: 200 },
-        }));
-        children.push(new Paragraph({
-          children: [new TextRun({ text: `— ${engagement.client?.name || 'Company'} Management`, size: 24, color: '64748b' })],
-          alignment: AlignmentType.CENTER,
-        }));
-        break;
-    }
-  }
+  const header = buildHeader(engagement, engRow.firmName);
+  const footer = buildFooter(engRow.firmName);
  
   const doc = new Document({
-    creator:  'FinStatement SaaS',
-    title:    `${engagement.client?.name} — Annual Report ${engagement.financialYear}`,
-    subject:  `Financial Statements — ${engagement.method}`,
+    styles: {
+      default: { document: { run: { font: FONT, size: SZ_NORMAL } } },
+    },
     sections: [{
       properties: {
         page: {
-          margin: { top: convertInchesToTwip(1), right: convertInchesToTwip(1), bottom: convertInchesToTwip(1), left: convertInchesToTwip(1.25) },
+          size: { width: 11906, height: 16838 }, // A4
+          margin: { top: 1440, right: 1152, bottom: 1008, left: 1440, header: 720, footer: 432 },
         },
       },
-      footers: {
-        default: new Footer({
-          children: [new Paragraph({
-            children: [
-              new TextRun({ text: `${engagement.client?.name || ''} — FY ${engagement.financialYear}  |  Page `, size: 18, color: '94a3b8' }),
-              new TextRun({ children: [PageNumber.CURRENT], size: 18, color: '94a3b8' }),
-            ],
-            alignment: AlignmentType.CENTER,
-          })],
-        }),
-      },
+      headers:  { default: header },
+      footers:  { default: footer },
       children,
     }],
   });
@@ -491,139 +580,99 @@ async function exportWord(engagementId, firmId) {
   return Packer.toBuffer(doc);
 }
  
-function collapseNotes(details) {
-  const groups = new Map();
-  for (const d of details) {
-    const key = d.subGroupName || 'Other';
-    if (!groups.has(key)) groups.set(key, { subGroupName: key, rows: [], subtotal: 0 });
-    const g = groups.get(key);
-    g.rows.push({ accountNumber: d.accountNumber, accountName: d.accountName, finalNet: Number(d.finalNet) });
-    g.subtotal += Number(d.finalNet);
-  }
-  return [...groups.values()];
-}
- 
-// ── Excel export ──────────────────────────────────────────────────────────────
+// ── Excel export (unchanged) ──────────────────────────────────────────────────
 async function exportExcel(engagementId, firmId) {
   const ExcelJS = require('exceljs');
   const wb = new ExcelJS.Workbook();
-  wb.creator = 'FinStatement SaaS';
+  wb.creator = 'FinStatement';
  
-  const engRows2 = await prisma.$queryRawUnsafe(
-    `SELECT e.*, c.name as "clientName", c.cin, c.pan, c.gstin,
-            c."tradeLicense", c."vatNumber", c.region as "clientRegion"
+  const engRows = await prisma.$queryRawUnsafe(
+    `SELECT e.*, c.name as "clientName", c.region as "clientRegion"
      FROM "Engagement" e JOIN "Client" c ON c.id = e."clientId"
      WHERE e.id = $1 AND c."firmId" = $2 LIMIT 1`,
     engagementId, firmId
   );
-  if (!engRows2.length) throw Object.assign(new Error('Engagement not found'), { status: 404 });
-  const engRow2 = engRows2[0];
-  const engagement = {
-    ...engRow2,
-    client: { name: engRow2.clientName, cin: engRow2.cin, pan: engRow2.pan,
-              gstin: engRow2.gstin, tradeLicense: engRow2.tradeLicense,
-              vatNumber: engRow2.vatNumber, region: engRow2.clientRegion },
-  };
-  if (!engagement) throw Object.assign(new Error('Not found'), { status: 404 });
+  if (!engRows.length) throw Object.assign(new Error('Not found'), { status: 404 });
+  const eng = engRows[0];
+  const method   = eng.method || 'AS';
+  const currency = ['IFRS','IFRS_SME'].includes(method) ? 'AED' : 'INR';
  
-  const rawLines = await prisma.fSLine.findMany({
-    where: { engagementId },
-    orderBy: { displayOrder: 'asc' },
-  });
-  const noteGroupsForJoin = await prisma.noteGroup.findMany({ where: { engagementId } });
-  const ngMapForJoin = new Map(noteGroupsForJoin.map(ng => [ng.noteGroupId, ng]));
-  const fsLines = rawLines.map(l => ({
-    ...l,
-    noteGroup: l.noteGroupId ? ngMapForJoin.get(l.noteGroupId) || null : null,
-  }));
+  const [rawFsLines, noteGroups] = await Promise.all([
+    prisma.fSLine.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } }),
+    prisma.noteGroup.findMany({ where: { engagementId }, orderBy: { noteNumber: 'asc' }, include: { noteDetails: { orderBy: { displayOrder: 'asc' } } } }),
+  ]);
+  const ngMap2 = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
+  const fsLines2 = rawFsLines.map(l => ({ ...l, noteGroup: l.noteGroupId ? ngMap2.get(l.noteGroupId) : null }));
  
-  const bsLines = fsLines.filter(l => l.sheet === 'BS');
-  const plLines = fsLines.filter(l => l.sheet === 'PL');
+  function addSheet(name, lines, title) {
+    const ws = wb.addWorksheet(name);
+    ws.columns = [
+      { header: 'Particulars', key: 'label', width: 45 },
+      { header: 'Note', key: 'note', width: 8 },
+      { header: `Amount (${currency})`, key: 'amount', width: 18 },
+    ];
+    ws.getRow(1).font = { bold: true, size: 11 };
+    ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } };
+    ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
  
-  const style = { font: { name: 'Calibri', size: 11 } };
-  const bold  = { font: { name: 'Calibri', size: 11, bold: true } };
-  const hdrStyle = { font: { name: 'Calibri', size: 11, bold: true, color: { argb: 'FFFFFFFF' } }, fill: { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF1E293B' } }, alignment: { horizontal: 'center' } };
- 
-  // ── BS Sheet ──
-  const bsSheet = wb.addWorksheet('Balance Sheet');
-  bsSheet.columns = [{ width: 50 }, { width: 10 }, { width: 20 }];
-  const addBSRow = (label, note, amount, isBold) => {
-    const row = bsSheet.addRow([label, note || '', amount !== undefined ? amount : '']);
-    if (isBold) { row.font = { bold: true, name: 'Calibri', size: 11 }; row.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFF1F5F9' } }; }
-    if (amount !== undefined && amount !== '') { row.getCell(3).numFmt = '#,##0.00'; row.getCell(3).alignment = { horizontal: 'right' }; }
-    row.getCell(2).alignment = { horizontal: 'center' };
-  };
- 
-  bsSheet.addRow(['Balance Sheet', '', '']).font = { bold: true, size: 14, name: 'Calibri' };
-  bsSheet.addRow(['as at 31st March', '', '']);
-  bsSheet.addRow([]);
-  ['Particulars','Note','Amount (₹)'].forEach((h,i) => { const c = bsSheet.getRow(4).getCell(i+1); c.value = h; Object.assign(c, hdrStyle); });
- 
-  for (const line of bsLines) {
-    addBSRow(line.groupName, line.noteGroup?.noteNumber, Number(line.totalFinalNet), false);
-  }
- 
-  // ── P&L Sheet ──
-  const plSheet = wb.addWorksheet('Profit and Loss');
-  plSheet.columns = [{ width: 50 }, { width: 10 }, { width: 20 }];
-  ['Particulars','Note','Amount (₹)'].forEach((h,i) => { const c = plSheet.getRow(1).getCell(i+1); c.value = h; Object.assign(c, hdrStyle); });
-  for (const line of plLines) {
-    const row = plSheet.addRow([line.groupName, line.noteGroup?.noteNumber || '', Number(line.totalFinalNet)]);
-    row.getCell(3).numFmt = '#,##0.00';
-    row.getCell(3).alignment = { horizontal: 'right' };
-  }
- 
-  // ── Notes Sheet ──
-  const notesSheet = wb.addWorksheet('Notes');
-  const noteGroups = await prisma.noteGroup.findMany({
-    where: { engagementId },
-    orderBy: { noteNumber: 'asc' },
-    include: { noteDetails: { orderBy: { displayOrder: 'asc' } } },
-  });
-  notesSheet.columns = [{ width: 10 }, { width: 50 }, { width: 20 }];
-  let notesRow = 1;
-  for (const ng of noteGroups.filter(n=>!n.noteGroupId?.startsWith('__'))) {
-    const hRow = notesSheet.getRow(notesRow++);
-    hRow.getCell(1).value = `Note ${ng.noteNumber}`;
-    hRow.getCell(2).value = ng.title;
-    hRow.font = { bold: true, name: 'Calibri', size: 11, color: { argb: 'FF4F46E5' } };
-    for (const d of ng.noteDetails) {
-      const r = notesSheet.getRow(notesRow++);
-      r.getCell(2).value = d.accountName || d.accountNumber;
-      r.getCell(3).value = Number(d.finalNet);
-      r.getCell(3).numFmt = '#,##0.00';
-      r.getCell(3).alignment = { horizontal: 'right' };
+    let rowIdx = 2;
+    for (const l of lines) {
+      const v = Number(l.totalFinalNet || 0);
+      if (Math.abs(v) < 0.005) continue;
+      const row = ws.addRow({ label: l.groupName, note: l.noteGroup?.noteNumber || '', amount: v });
+      row.getCell('amount').numFmt = '#,##0;(#,##0);"-"';
+      row.getCell('amount').alignment = { horizontal: 'right' };
+      rowIdx++;
     }
-    const totRow = notesSheet.getRow(notesRow++);
-    totRow.getCell(2).value = `Total — ${ng.title}`;
-    totRow.getCell(3).value = ng.noteDetails.reduce((s,d)=>s+Number(d.finalNet),0);
-    totRow.getCell(3).numFmt = '#,##0.00';
-    totRow.getCell(3).alignment = { horizontal: 'right' };
-    totRow.font = { bold: true, name: 'Calibri', size: 11 };
-    notesRow++;
+    return ws;
+  }
+ 
+  addSheet('Balance Sheet', fsLines2.filter(l => l.sheet === 'BS'), 'Balance Sheet');
+  addSheet('Profit & Loss', fsLines2.filter(l => l.sheet === 'PL'), 'P&L');
+ 
+  // Notes sheet
+  const wsN = wb.addWorksheet('Notes');
+  wsN.columns = [
+    { key: 'note', width: 8 },
+    { key: 'title', width: 35 },
+    { key: 'subgroup', width: 30 },
+    { key: 'amount', width: 18 },
+  ];
+  let nr = 1;
+  for (const ng of noteGroups) {
+    const total = ng.noteDetails.reduce((s, d) => s + Number(d.finalNet || 0), 0);
+    if (Math.abs(total) < 0.005) continue;
+    const hRow = wsN.addRow([ng.noteNumber, ng.title, '', '']);
+    hRow.font = { bold: true }; hRow.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFEEF2FF' } };
+    nr++;
+ 
+    const sgs = collapseNotes(ng.noteDetails);
+    for (const sg of sgs) {
+      if (Math.abs(sg.subtotal) < 0.005) continue;
+      const sgRow = wsN.addRow(['', '', sg.subGroupName, sg.subtotal]);
+      sgRow.getCell(4).numFmt = '#,##0;(#,##0);"-"';
+      sgRow.getCell(4).alignment = { horizontal: 'right' };
+      nr++;
+    }
+    const totRow = wsN.addRow(['', `Total — ${ng.title}`, '', total]);
+    totRow.font = { bold: true };
+    totRow.getCell(4).numFmt = '#,##0;(#,##0);"-"';
+    totRow.getCell(4).alignment = { horizontal: 'right' };
+    totRow.getCell(4).border = { top: { style: 'thin' }, bottom: { style: 'double' } };
+    nr++;
+    wsN.addRow([]);
   }
  
   return wb.xlsx.writeBuffer();
 }
  
-// ── PDF Export — generates HTML then sends to frontend for print ──────────────
-async function exportPDFData(engagementId, firmId) {
-  const engRows = await prisma.$queryRawUnsafe(
-    `SELECT e.*, c.name as "clientName", c.id as "clientId", c.cin, c.pan, c.gstin,
-            c."tradeLicense", c."vatNumber", c.region as "clientRegion"
-     FROM "Engagement" e JOIN "Client" c ON c.id = e."clientId"
-     WHERE e.id = $1 AND c."firmId" = $2 LIMIT 1`,
-    engagementId, firmId
-  );
-  if (!engRows.length) throw Object.assign(new Error('Engagement not found'), { status: 404 });
-  const engRow   = engRows[0];
-  const fsLines  = await prisma.fSLine.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } });
-  const noteGroups = await prisma.noteGroup.findMany({ where: { engagementId }, orderBy: { noteNumber: 'asc' } });
-  const noteDetails = await prisma.noteDetail.findMany({ where: { engagementId } });
-  return {
-    engagement: { ...engRow, clientName: engRow.clientName },
-    fsLines, noteGroups, noteDetails,
-  };
+// ── PDF data ──────────────────────────────────────────────────────────────────
+async function exportPdfData(engagementId, firmId) {
+  const [fsLines, noteGroups] = await Promise.all([
+    prisma.fSLine.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } }),
+    prisma.noteGroup.findMany({ where: { engagementId }, orderBy: { noteNumber: 'asc' }, include: { noteDetails: true } }),
+  ]);
+  return { fsLines, noteGroups };
 }
  
-module.exports = { exportWord, exportExcel, exportPDFData };
+module.exports = { exportWord, exportExcel, exportPdfData };
