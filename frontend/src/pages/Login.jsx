@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { authAPI } from '../api/client';
 import toast from 'react-hot-toast';
- 
+
 // High-quality financial stock photos from Unsplash (free, no attribution needed for display)
 const BG_IMAGES = [
   'https://images.unsplash.com/photo-1611974789855-9c2a0a7236a3?w=1920&q=85&fit=crop', // trading screens
@@ -12,7 +12,7 @@ const BG_IMAGES = [
   'https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=1920&q=85&fit=crop', // professional
   'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=1920&q=85&fit=crop', // city skyline
 ];
- 
+
 const CAPTIONS = [
   { title: 'Financial Intelligence', sub: 'Real-time insights for smarter decisions' },
   { title: 'Built for CA Firms', sub: 'Streamline your audit and compliance workflow' },
@@ -20,21 +20,31 @@ const CAPTIONS = [
   { title: 'Trusted by Professionals', sub: 'Secure, accurate, and audit-ready reporting' },
   { title: 'Scale with Confidence', sub: 'From single engagements to enterprise portfolios' },
 ];
- 
+
 const BACKEND = import.meta.env.VITE_API_BASE_URL ||
   (typeof window !== 'undefined' && window.location.hostname !== 'localhost'
     ? 'https://fsautomate.onrender.com' : 'http://localhost:4000');
- 
+
 export default function Login() {
   const navigate = useNavigate();
   const { setAuth } = useStore();
- 
+
   const [form, setForm]         = useState({ email: '', password: '' });
   const [loading, setLoading]   = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [current, setCurrent]   = useState(0);
   const [fading, setFading]     = useState(false);
- 
+
+  // Forgot password state
+  const [forgotOpen, setForgotOpen]   = useState(false);
+  const [fpStep, setFpStep]           = useState(1); // 1=email, 2=otp+newpass
+  const [fpEmail, setFpEmail]         = useState('');
+  const [fpOTP, setFpOTP]             = useState('');
+  const [fpPass, setFpPass]           = useState('');
+  const [fpPass2, setFpPass2]         = useState('');
+  const [fpLoading, setFpLoading]     = useState(false);
+  const [fpDevOTP, setFpDevOTP]       = useState('');
+
   // Rotate background images every 4 seconds
   useEffect(() => {
     const timer = setInterval(() => {
@@ -46,12 +56,39 @@ export default function Login() {
     }, 4000);
     return () => clearInterval(timer);
   }, []);
- 
+
   // Preload images
   useEffect(() => {
     BG_IMAGES.forEach(src => { const img = new Image(); img.src = src; });
   }, []);
- 
+
+  async function sendForgotOTP() {
+    if (!fpEmail.trim()) { toast.error('Enter your email address'); return; }
+    setFpLoading(true);
+    try {
+      const res = await authAPI.forgotPassword({ email: fpEmail.trim() });
+      toast.success(res.message || 'OTP sent to your email');
+      if (res.otp) setFpDevOTP(res.otp); // dev mode
+      setFpStep(2);
+    } catch (err) { toast.error(err?.error || 'Failed to send OTP'); }
+    finally { setFpLoading(false); }
+  }
+
+  async function resetPassword() {
+    if (!fpOTP.trim()) { toast.error('Enter the OTP'); return; }
+    if (!fpPass || fpPass.length < 8) { toast.error('Password must be at least 8 characters'); return; }
+    if (fpPass !== fpPass2) { toast.error('Passwords do not match'); return; }
+    setFpLoading(true);
+    try {
+      await authAPI.resetPassword({ email: fpEmail, otp: fpOTP, newPassword: fpPass });
+      toast.success('Password reset! Please log in.');
+      setForgotOpen(false);
+      setFpStep(1); setFpEmail(''); setFpOTP(''); setFpPass(''); setFpPass2(''); setFpDevOTP('');
+      setForm(f => ({ ...f, email: fpEmail }));
+    } catch (err) { toast.error(err?.error || 'Invalid OTP'); }
+    finally { setFpLoading(false); }
+  }
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (!form.email || !form.password) { toast.error('Please enter email and password'); return; }
@@ -64,10 +101,10 @@ export default function Login() {
       toast.error(err?.error || 'Invalid email or password');
     } finally { setLoading(false); }
   }
- 
+
   return (
     <div className="min-h-screen flex overflow-hidden font-sans">
- 
+
       {/* ── LEFT: Rotating Background ─────────────────────────────────── */}
       <div className="hidden lg:flex lg:flex-1 relative overflow-hidden">
         {/* Background image */}
@@ -78,14 +115,14 @@ export default function Login() {
             opacity: fading ? 0 : 1,
           }}
         />
- 
+
         {/* Dark overlay gradient */}
         <div className="absolute inset-0 bg-gradient-to-br from-slate-900/80 via-slate-800/60 to-indigo-900/70" />
- 
+
         {/* Subtle grid overlay */}
         <div className="absolute inset-0 opacity-10"
           style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
- 
+
         {/* Content */}
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           {/* Logo */}
@@ -100,7 +137,7 @@ export default function Login() {
               <p className="text-white/50 text-xs tracking-widest uppercase">Professional</p>
             </div>
           </div>
- 
+
           {/* Caption */}
           <div className={`transition-all duration-700 ${fading ? 'opacity-0 translate-y-2' : 'opacity-100 translate-y-0'}`}>
             <div className="mb-6">
@@ -116,7 +153,7 @@ export default function Login() {
               </h2>
               <p className="text-white/70 text-lg">{CAPTIONS[current].sub}</p>
             </div>
- 
+
             {/* Stats row */}
             <div className="flex gap-6">
               {[
@@ -133,16 +170,16 @@ export default function Login() {
           </div>
         </div>
       </div>
- 
+
       {/* ── RIGHT: Login Panel ────────────────────────────────────────── */}
       <div className="w-full lg:w-[480px] flex-shrink-0 flex flex-col justify-center px-8 md:px-12 bg-gradient-to-br from-slate-50 to-blue-50/40 relative">
- 
+
         {/* Subtle background texture */}
         <div className="absolute inset-0 opacity-30"
           style={{ backgroundImage: 'radial-gradient(circle at 20% 20%, rgba(99,102,241,0.08) 0%, transparent 60%), radial-gradient(circle at 80% 80%, rgba(59,130,246,0.06) 0%, transparent 60%)' }} />
- 
+
         <div className="relative z-10 max-w-sm mx-auto w-full">
- 
+
           {/* Mobile logo */}
           <div className="flex items-center gap-3 mb-10 lg:hidden">
             <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center">
@@ -152,13 +189,13 @@ export default function Login() {
             </div>
             <p className="text-slate-900 font-bold text-lg">FinStatement</p>
           </div>
- 
+
           {/* Header */}
           <div className="mb-8">
             <h1 className="text-2xl font-bold text-slate-900 mb-1">Welcome back</h1>
             <p className="text-slate-500 text-sm">Sign in to your workspace</p>
           </div>
- 
+
           {/* OAuth buttons */}
           <div className="space-y-3 mb-6">
             {[
@@ -195,14 +232,14 @@ export default function Login() {
               </button>
             ))}
           </div>
- 
+
           {/* Divider */}
           <div className="flex items-center gap-3 mb-6">
             <div className="flex-1 h-px bg-slate-200" />
             <span className="text-xs text-slate-400 font-medium">or sign in with email</span>
             <div className="flex-1 h-px bg-slate-200" />
           </div>
- 
+
           {/* Form */}
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
@@ -217,11 +254,12 @@ export default function Login() {
                 autoFocus
               />
             </div>
- 
+
             <div>
               <div className="flex items-center justify-between mb-1.5">
                 <label className="text-xs font-semibold text-slate-600">Password</label>
-                <button type="button" className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
+                <button type="button" onClick={() => { setForgotOpen(true); setFpStep(1); setFpDevOTP(''); }}
+                  className="text-xs text-indigo-600 hover:text-indigo-700 font-medium">
                   Forgot password?
                 </button>
               </div>
@@ -252,7 +290,7 @@ export default function Login() {
                 </button>
               </div>
             </div>
- 
+
             <button
               type="submit"
               disabled={loading}
@@ -269,7 +307,7 @@ export default function Login() {
               ) : 'Sign in'}
             </button>
           </form>
- 
+
           {/* Register link */}
           <p className="text-center text-sm text-slate-500 mt-6">
             New to FinStatement?{' '}
@@ -277,7 +315,7 @@ export default function Login() {
               Create account
             </a>
           </p>
- 
+
           {/* Security badge */}
           <div className="flex items-center justify-center gap-2 mt-8 text-xs text-slate-400">
             <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -287,6 +325,81 @@ export default function Login() {
           </div>
         </div>
       </div>
+    </div>
+
+      {/* Forgot Password Modal */}
+      {forgotOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm mx-4">
+            <div className="flex items-center justify-between mb-6">
+              <h2 className="text-lg font-bold text-slate-900">
+                {fpStep === 1 ? 'Reset Password' : 'Enter OTP & New Password'}
+              </h2>
+              <button onClick={() => setForgotOpen(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            </div>
+
+            {fpStep === 1 ? (
+              <div className="space-y-4">
+                <p className="text-sm text-slate-500">Enter your email address and we'll send you a reset code.</p>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Email Address</label>
+                  <input type="email" value={fpEmail}
+                    onChange={e => setFpEmail(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && sendForgotOTP()}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400"
+                    placeholder="your@email.com" autoFocus />
+                </div>
+                <button onClick={sendForgotOTP} disabled={fpLoading}
+                  className="w-full py-2.5 bg-indigo-600 text-white font-semibold text-sm rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+                  {fpLoading ? 'Sending...' : 'Send Reset Code'}
+                </button>
+              </div>
+            ) : (
+              <div className="space-y-4">
+                <p className="text-sm text-slate-500">Enter the 6-digit code sent to <strong>{fpEmail}</strong></p>
+                {fpDevOTP && (
+                  <div className="bg-amber-50 border border-amber-200 rounded-xl p-3 text-center">
+                    <p className="text-xs text-amber-600 font-medium">Dev Mode OTP</p>
+                    <p className="text-2xl font-bold text-amber-700 tracking-widest">{fpDevOTP}</p>
+                  </div>
+                )}
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">6-Digit OTP</label>
+                  <input type="text" maxLength={6} value={fpOTP}
+                    onChange={e => setFpOTP(e.target.value.replace(/\D/g, ''))}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 text-center tracking-widest font-bold text-lg"
+                    placeholder="000000" autoFocus />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">New Password</label>
+                  <input type="password" value={fpPass}
+                    onChange={e => setFpPass(e.target.value)}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                    placeholder="At least 8 characters" />
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-600 mb-1.5">Confirm New Password</label>
+                  <input type="password" value={fpPass2}
+                    onChange={e => setFpPass2(e.target.value)}
+                    onKeyDown={e => e.key === 'Enter' && resetPassword()}
+                    className="w-full px-4 py-2.5 border border-slate-200 rounded-xl text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30"
+                    placeholder="Repeat new password" />
+                  {fpPass2 && fpPass !== fpPass2 && <p className="text-red-500 text-xs mt-1">Passwords do not match</p>}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => setFpStep(1)} className="px-4 py-2.5 border border-slate-200 text-slate-600 text-sm rounded-xl hover:bg-slate-50">
+                    Back
+                  </button>
+                  <button onClick={resetPassword} disabled={fpLoading}
+                    className="flex-1 py-2.5 bg-indigo-600 text-white font-semibold text-sm rounded-xl hover:bg-indigo-700 disabled:opacity-50">
+                    {fpLoading ? 'Resetting...' : 'Reset Password'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

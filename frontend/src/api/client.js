@@ -47,9 +47,11 @@ export const authAPI = {
   me:             ()     => api.get('/auth/me'),
   savePageState:  (ps)   => api.patch('/auth/page-state', { pageState: ps }),
   getPageState:   ()     => api.get('/auth/page-state'),
-  updateProfile:  (data) => api.patch('/auth/profile', data),
-  changePassword: (data) => api.patch('/auth/password', data),
-  updateFirm:     (data) => api.patch('/auth/firm', data),
+  updateProfile:    (data) => api.patch('/auth/profile', data),
+  changePassword:   (data) => api.patch('/auth/password', data),
+  updateFirm:       (data) => api.patch('/auth/firm', data),
+  forgotPassword:   (data) => api.post('/auth/forgot-password', data),
+  resetPassword:    (data) => api.post('/auth/reset-password', data),
 };
 
 // ─── Client API ───────────────────────────────────────────────────────────
@@ -58,11 +60,14 @@ export const clientAPI = {
   get:    (id)       => api.get(`/clients/${id}`),
   create: (data)     => api.post('/clients', data),
   update: (id, data) => api.put(`/clients/${id}`, data),
+  delete: (id)       => api.delete(`/clients/${id}`),
 };
 
 // ─── Engagement API ───────────────────────────────────────────────────────
 export const engagementAPI = {
   list:       (clientId) => api.get(`/engagements/client/${clientId}`),
+  update:     (id, data) => api.patch(`/engagements/${id}`, data),
+  delete:     (id)       => api.delete(`/engagements/${id}`),
   get:        (id)       => api.get(`/engagements/${id}`),
   create:     (clientId, data) => api.post('/engagements', { ...data, clientId }),
   lock:       (id, lock) => api.patch(`/engagements/${id}/lock`, { lock }),

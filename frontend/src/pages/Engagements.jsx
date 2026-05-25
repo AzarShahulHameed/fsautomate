@@ -8,7 +8,7 @@ import toast from 'react-hot-toast';
 // Region config — single source of truth
 const REGION_CONFIG = {
   India: {
-    flag: '🇮🇳', currency: 'INR', currSymbol: '₹',
+    flag: '', currency: 'INR', currSymbol: '₹',
     methods: ['AS', 'IND_AS'],
     methodLabels: { AS: 'AS — Companies Act 2013', IND_AS: 'Ind AS — IFRS Converged' },
     idLabel: 'CIN', taxLabel: 'PAN', gstLabel: 'GSTIN',
@@ -16,7 +16,7 @@ const REGION_CONFIG = {
     fyOptions: ['2024-25','2023-24','2022-23','2021-22','2020-21'],
   },
   UAE: {
-    flag: '🇦🇪', currency: 'AED', currSymbol: 'AED',
+    flag: '', currency: 'AED', currSymbol: 'AED',
     methods: ['IFRS', 'IFRS_SME'],
     methodLabels: { IFRS: 'IFRS — Full Standards', IFRS_SME: 'IFRS SME — Simplified' },
     idLabel: 'Trade License No.', taxLabel: 'VAT Reg. No.', gstLabel: null,
@@ -66,6 +66,24 @@ export default function Engagements() {
       .then(data => setEngagements(data))
       .catch(() => toast.error('Failed to load engagements'));
   }, [clientId]);
+
+  function openEdit(e) {
+    setEditEng(e);
+    setForm({ name: e.name, financialYear: e.financialYear, method: e.method, currency: e.currency || regionCfg.currency });
+    setShowNew(true);
+  }
+
+  async function handleDeleteEng() {
+    if (!deleteEng) return;
+    setDeleting(true);
+    try {
+      await engagementAPI.delete(deleteEng.id);
+      setEngagements(es => es.filter(e => e.id !== deleteEng.id));
+      setDeleteEng(null);
+      toast.success(`"${deleteEng.name}" archived`);
+    } catch (err) { toast.error(err?.error || 'Delete failed'); }
+    finally { setDeleting(false); }
+  }
 
   async function create() {
     if (!form.name) { toast.error('Engagement name is required'); return; }
@@ -118,7 +136,7 @@ export default function Engagements() {
         <div className="mb-8 bg-white border border-slate-200 rounded-3xl p-6 shadow-xl">
           <div className="flex items-center justify-between mb-5">
             <h3 className="font-bold text-slate-900 text-lg">New Engagement</h3>
-            <button onClick={() => setShowNew(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            <button onClick={() => { setShowNew(false); setEditEng(null); }} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
           </div>
 
           {/* Region info banner */}
@@ -198,8 +216,9 @@ export default function Engagements() {
       {/* Engagement list */}
       <div className="space-y-3">
         {engagements.map(e => (
-          <button key={e.id} onClick={() => open(e)}
-            className="w-full bg-white border border-slate-200 rounded-2xl p-5 text-left hover:border-indigo-300 hover:shadow-md transition-all flex items-center justify-between group">
+          <div key={e.id}
+            className="w-full bg-white border border-slate-200 rounded-2xl p-5 text-left hover:border-indigo-300 hover:shadow-md transition-all group">
+            <div className="flex items-center justify-between cursor-pointer" onClick={() => open(e)}>
             <div className="flex items-center gap-4">
               <div className={`w-11 h-11 rounded-xl flex items-center justify-center text-white font-bold text-sm ${methodBadgeColor[e.method]?.replace('text-','').replace('bg-','bg-') || 'bg-indigo-100'}`}>
                 <BookOpen size={18} className={methodBadgeColor[e.method]?.split(' ')[1] || 'text-indigo-600'} />
@@ -228,6 +247,31 @@ export default function Engagements() {
           </div>
         )}
       </div>
+    </div>
+      {/* Delete confirmation modal */}
+      {deleteEng && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm mx-4">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 rounded-2xl bg-red-100 flex items-center justify-center text-3xl mx-auto mb-4">📁</div>
+              <h2 className="text-lg font-bold text-slate-900">Archive Engagement?</h2>
+              <p className="text-sm text-slate-500 mt-2">
+                <strong>"{deleteEng.name}"</strong> will be archived and hidden from the list.
+              </p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteEng(null)}
+                className="flex-1 py-2.5 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50">
+                Cancel
+              </button>
+              <button onClick={handleDeleteEng} disabled={deleting}
+                className="flex-1 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:opacity-50">
+                {deleting ? 'Archiving...' : 'Yes, Archive'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

@@ -3,39 +3,38 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { clientAPI } from '../api/client';
 import toast from 'react-hot-toast';
- 
+
 // Region-specific field config
 const REGION_FIELDS = {
   India: {
-    flag: '🇮🇳', currency: 'INR', currencySymbol: '₹',
+    flag: '', currency: 'INR', currencySymbol: '₹',
     idLabel: 'CIN', idPlaceholder: 'U12345MH2020PTC123456',
     taxLabel: 'PAN', taxPlaceholder: 'AAAAA0000A',
     gstLabel: 'GSTIN', gstPlaceholder: '29AAAAA0000A1Z5',
     extraLabel: null,
   },
   UAE: {
-    flag: '🇦🇪', currency: 'AED', currencySymbol: 'AED',
+    flag: '', currency: 'AED', currencySymbol: 'AED',
     idLabel: 'Trade License No.', idPlaceholder: 'CN-1234567',
     taxLabel: 'VAT Registration No.', taxPlaceholder: '100123456789003',
     gstLabel: 'Emirates ID (Owner)', gstPlaceholder: '784-XXXX-XXXXXXX-X',
     extraLabel: 'Dubai DED / Free Zone',
   },
 };
- 
+
 const METHOD_BY_REGION = {
   India: ['AS', 'IND_AS'],
   UAE:   ['IFRS', 'IFRS_SME'],
 };
- 
-function ClientCard({ client, onClick }) {
+
+function ClientCard({ client, onClick, onEdit, onDelete }) {
   const regionCfg = REGION_FIELDS[client.region] || REGION_FIELDS.India;
   return (
-    <div onClick={onClick}
-      className="bg-white border border-slate-200 rounded-2xl p-5 cursor-pointer hover:border-indigo-300 hover:shadow-lg transition-all group hover:-translate-y-0.5">
-      <div className="flex items-start justify-between">
+    <div className="bg-white border border-slate-200 rounded-2xl p-5 hover:border-indigo-300 hover:shadow-lg transition-all group hover:-translate-y-0.5 relative">
+      <div className="flex items-start justify-between" onClick={onClick} style={{ cursor: 'pointer' }}>
         <div className="flex items-center gap-3">
-          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center text-2xl flex-shrink-0 group-hover:from-indigo-200 group-hover:to-purple-200 transition-all">
-            {regionCfg.flag}
+          <div className="w-12 h-12 rounded-xl bg-gradient-to-br from-indigo-100 to-purple-100 flex items-center justify-center text-lg font-bold text-indigo-600 flex-shrink-0 group-hover:from-indigo-200 group-hover:to-purple-200 transition-all">
+            {client.name?.charAt(0)?.toUpperCase()}
           </div>
           <div>
             <h3 className="font-bold text-slate-900 group-hover:text-indigo-700 transition-colors">{client.name}</h3>
@@ -47,10 +46,21 @@ function ClientCard({ client, onClick }) {
         </div>
         <div className="flex flex-col items-end gap-1.5">
           <span className={`px-2.5 py-1 rounded-full text-xs font-bold ${client.region==='UAE'?'bg-emerald-100 text-emerald-700':'bg-blue-100 text-blue-700'}`}>
-            {regionCfg.flag} {client.region}
+            {client.region}
           </span>
           <span className="text-xs text-slate-400">{regionCfg.currency}</span>
         </div>
+      </div>
+      {/* Edit / Delete buttons */}
+      <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
+        <button onClick={e => { e.stopPropagation(); onEdit(client); }}
+          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-all">
+          ✏️ Edit
+        </button>
+        <button onClick={e => { e.stopPropagation(); onDelete(client); }}
+          className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-all">
+          🗑 Delete
+        </button>
       </div>
       {(client.pan || client.vatNumber) && (
         <div className="mt-3 pt-3 border-t border-slate-100 flex gap-4 text-xs text-slate-500">
@@ -60,9 +70,36 @@ function ClientCard({ client, onClick }) {
         </div>
       )}
     </div>
+      {/* Delete confirmation modal */}
+      {deleteClient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm mx-4">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 rounded-2xl bg-red-100 flex items-center justify-center text-3xl mx-auto mb-4">🗑</div>
+              <h2 className="text-lg font-bold text-slate-900">Delete Client?</h2>
+              <p className="text-sm text-slate-500 mt-2">
+                Are you sure you want to delete <strong>"{deleteClient.name}"</strong>?
+                This cannot be undone.
+              </p>
+              <p className="text-xs text-red-500 mt-2">Note: Clients with active engagements cannot be deleted.</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteClient(null)}
+                className="flex-1 py-2.5 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50">
+                Cancel
+              </button>
+              <button onClick={handleDelete} disabled={deleting}
+                className="flex-1 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:opacity-50">
+                {deleting ? 'Deleting...' : 'Yes, Delete'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
- 
+
 export default function Clients() {
   const navigate = useNavigate();
   const { setCurrentClient, firm } = useStore();
@@ -71,7 +108,7 @@ export default function Clients() {
   const [showForm, setShowForm] = useState(false);
   const [search, setSearch]     = useState('');
   const [filterRegion, setFilterRegion] = useState('All');
- 
+
   // Default region from firm
   const firmRegion = firm?.region || 'India';
   const [form, setForm] = useState({
@@ -80,21 +117,46 @@ export default function Clients() {
     tradeLicense: '', vatNumber: '',
     email: '', phone: '', website: '', address: '',
   });
- 
+
   useEffect(() => {
     clientAPI.list().then(data => setClients(data)).catch(() => toast.error('Failed to load clients'));
     setLoading(false);
   }, []);
- 
+
   const set = useCallback((k, v) => setForm(f => ({ ...f, [k]: v })), []);
+
+  function openEdit(client) {
+    setEditClient(client);
+    setForm({
+      name: client.name || '', region: client.region || 'India',
+      address: client.address || '', cin: client.cin || '',
+      pan: client.pan || '', gstin: client.gstin || '',
+      tradeLicense: client.tradeLicense || '', vatNumber: client.vatNumber || '',
+      email: client.email || '', phone: client.phone || '',
+    });
+    setShowForm(true);
+  }
+
+  async function handleDelete() {
+    if (!deleteClient) return;
+    setDeleting(true);
+    try {
+      await clientAPI.delete(deleteClient.id);
+      setClients(cs => cs.filter(c => c.id !== deleteClient.id));
+      setDeleteClient(null);
+      toast.success(`"${deleteClient.name}" deleted`);
+    } catch (err) {
+      toast.error(err?.error || 'Cannot delete — client may have active engagements');
+    } finally { setDeleting(false); }
+  }
   const regionCfg = useMemo(() => REGION_FIELDS[form.region] || REGION_FIELDS.India, [form.region]);
- 
+
   async function create(e) {
     e.preventDefault();
- 
+
     // ── Frontend validation ────────────────────────────────────────────
     if (!form.name.trim()) { toast.error('Company name is required'); return; }
- 
+
     // Required fields by region
     if (form.region === 'India') {
       if (!form.pan.trim())  { toast.error('PAN is required for Indian clients'); return; }
@@ -104,7 +166,7 @@ export default function Clients() {
       if (!form.tradeLicense.trim()) { toast.error('Trade License No. is required for UAE clients'); return; }
       if (!form.vatNumber.trim())    { toast.error('VAT Registration No. is required for UAE clients'); return; }
     }
- 
+
     // Format validation
     if (form.region === 'India') {
       if (form.cin && form.cin.trim() && form.cin.trim().length !== 21) {
@@ -129,7 +191,7 @@ export default function Clients() {
         }
       }
     }
- 
+
     if (form.region === 'UAE') {
       if (form.tradeLicense && form.tradeLicense.trim() && form.tradeLicense.trim().length < 5) {
         toast.error('Trade License must be at least 5 characters'); return;
@@ -144,13 +206,13 @@ export default function Clients() {
         }
       }
     }
- 
+
     if (form.email && form.email.trim()) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email.trim())) {
         toast.error('Please enter a valid email address'); return;
       }
     }
- 
+
     // ── Submit ─────────────────────────────────────────────────────────
     try {
       const payload = {
@@ -177,13 +239,13 @@ export default function Clients() {
       toast.error(msg);
     }
   }
- 
+
   const filtered = clients.filter(c => {
     const matchSearch = c.name.toLowerCase().includes(search.toLowerCase()) || (c.cin||c.tradeLicense||'').toLowerCase().includes(search.toLowerCase());
     const matchRegion = filterRegion === 'All' || c.region === filterRegion;
     return matchSearch && matchRegion;
   });
- 
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50/20 p-8">
       {/* Header */}
@@ -197,7 +259,7 @@ export default function Clients() {
           <span className="text-lg">+</span> New Client
         </button>
       </div>
- 
+
       {/* Filters */}
       <div className="flex gap-3 mb-6 flex-wrap">
         <div className="relative flex-1 min-w-48">
@@ -210,20 +272,20 @@ export default function Clients() {
           {['All','India','UAE'].map(r => (
             <button key={r} onClick={() => setFilterRegion(r)}
               className={`px-4 py-2.5 rounded-xl text-sm font-medium border transition-all ${filterRegion===r?'bg-indigo-600 text-white border-indigo-600 shadow-md':'bg-white text-slate-600 border-slate-200 hover:border-indigo-300'}`}>
-              {r === 'India' ? '🇮🇳 India' : r === 'UAE' ? '🇦🇪 UAE' : r}
+              {r === 'India' ? 'India' : r === 'UAE' ? 'UAE' : r}
             </button>
           ))}
         </div>
       </div>
- 
+
       {/* New Client Form */}
       {showForm && (
         <div className="mb-8 bg-white border border-slate-200 rounded-3xl p-6 shadow-xl">
           <div className="flex items-center justify-between mb-6">
-            <h2 className="text-lg font-bold text-slate-900">New Client</h2>
+            <h2 className="text-lg font-bold text-slate-900">{editClient ? "Edit Client" : "New Client"}</h2>
             <button onClick={() => setShowForm(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
           </div>
- 
+
           <form onSubmit={create}>
             {/* Region selection */}
             <div className="mb-5">
@@ -241,7 +303,7 @@ export default function Clients() {
                 ))}
               </div>
             </div>
- 
+
             <div className="grid grid-cols-2 gap-4" key={form.region}>
               {/* Company Name */}
               <div className="col-span-2">
@@ -250,7 +312,7 @@ export default function Clients() {
                   className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
                   placeholder={form.region==='UAE'?'ABC Trading LLC':'Acme Private Limited'} />
               </div>
- 
+
               {/* Region-specific ID fields */}
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">{regionCfg.idLabel}</label>
@@ -300,7 +362,7 @@ export default function Clients() {
                   placeholder={form.region==='UAE'?'Office 401, Business Bay, Dubai':'123 Main Street, Mumbai - 400001'} />
               </div>
             </div>
- 
+
             <div className="flex gap-3 mt-6">
               <button type="submit"
                 className="px-6 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-all shadow-md">
@@ -314,7 +376,7 @@ export default function Clients() {
           </form>
         </div>
       )}
- 
+
       {/* Client list */}
       {loading ? (
         <div className="text-center py-16 text-slate-400">Loading...</div>
@@ -335,6 +397,33 @@ export default function Clients() {
           {filtered.map(c => (
             <ClientCard key={c.id} client={c} onClick={() => { setCurrentClient(c); navigate(`/clients/${c.id}/engagements`); }} />
           ))}
+        </div>
+      )}
+    </div>
+      {/* Delete confirmation modal */}
+      {deleteClient && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+          <div className="bg-white rounded-2xl shadow-2xl p-8 w-full max-w-sm mx-4">
+            <div className="text-center mb-6">
+              <div className="w-16 h-16 rounded-2xl bg-red-100 flex items-center justify-center text-3xl mx-auto mb-4">🗑</div>
+              <h2 className="text-lg font-bold text-slate-900">Delete Client?</h2>
+              <p className="text-sm text-slate-500 mt-2">
+                Are you sure you want to delete <strong>"{deleteClient.name}"</strong>?
+                This cannot be undone.
+              </p>
+              <p className="text-xs text-red-500 mt-2">Note: Clients with active engagements cannot be deleted.</p>
+            </div>
+            <div className="flex gap-3">
+              <button onClick={() => setDeleteClient(null)}
+                className="flex-1 py-2.5 border border-slate-200 text-slate-600 text-sm font-semibold rounded-xl hover:bg-slate-50">
+                Cancel
+              </button>
+              <button onClick={handleDelete} disabled={deleting}
+                className="flex-1 py-2.5 bg-red-600 text-white text-sm font-semibold rounded-xl hover:bg-red-700 disabled:opacity-50">
+                {deleting ? 'Deleting...' : 'Yes, Delete'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

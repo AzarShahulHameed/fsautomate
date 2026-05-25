@@ -57,7 +57,14 @@ router.post('/send', authGuard, async (req, res, next) => {
       req.user.id, type, target, otp, expiresAt
     );
 
-    await sendOTP(type, target, otp, req.user.name);
+    // Send OTP via email or SMS
+    if (type === 'email') {
+      const html = otpEmailHTML(otp, `Please verify your email address.`, req.user.name, 10);
+      await sendEmail({ to: target, subject: `${otp} is your FinStatement verification code`, html });
+    } else {
+      // SMS — log for now, wire Twilio/Fast2SMS here
+      console.log(`[SMS OTP] Send ${otp} to ${target}`);
+    }
 
     res.json({
       sent: true,

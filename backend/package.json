@@ -36,7 +36,8 @@
     "@prisma/client": "^5.22.0",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
-    "passport-azure-ad": "^4.3.5"
+    "passport-azure-ad": "^4.3.5",
+    "resend": "^4.0.0"
   },
   "engines": {
     "node": ">=18.0.0 <22.0.0"
