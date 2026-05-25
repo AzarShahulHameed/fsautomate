@@ -3,24 +3,24 @@ import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { clientAPI } from '../api/client';
 import toast from 'react-hot-toast';
- 
+
 const REGION_FIELDS = {
   India: {
-    flag: '', currency: 'INR', currencySymbol: '₹',
+    currency: 'INR', currencySymbol: '₹',
     idLabel: 'CIN', idPlaceholder: 'U12345MH2020PTC123456',
     taxLabel: 'PAN', taxPlaceholder: 'AAAAA0000A',
     gstLabel: 'GSTIN', gstPlaceholder: '29AAAAA0000A1Z5',
   },
   UAE: {
-    flag: '', currency: 'AED', currencySymbol: 'AED',
+    currency: 'AED', currencySymbol: 'AED',
     idLabel: 'Trade License No.', idPlaceholder: 'CN-1234567',
     taxLabel: 'VAT Registration No.', taxPlaceholder: '100123456789003',
     gstLabel: 'Emirates ID (Owner)', gstPlaceholder: '784-XXXX-XXXXXXX-X',
   },
 };
- 
+
 const BLANK = { name:'', region:'India', cin:'', pan:'', gstin:'', tradeLicense:'', vatNumber:'', email:'', phone:'', address:'' };
- 
+
 function ClientCard({ client, onSelect, onEdit, onDelete }) {
   const regionCfg = REGION_FIELDS[client.region] || REGION_FIELDS.India;
   return (
@@ -45,7 +45,7 @@ function ClientCard({ client, onSelect, onEdit, onDelete }) {
           <span className="text-xs text-slate-400">{regionCfg.currency}</span>
         </div>
       </div>
- 
+
       {(client.pan || client.vatNumber || client.phone) && (
         <div className="mt-3 pt-3 border-t border-slate-100 flex gap-4 text-xs text-slate-500">
           {client.pan && <span>PAN: <span className="font-mono text-slate-700">{client.pan}</span></span>}
@@ -53,7 +53,7 @@ function ClientCard({ client, onSelect, onEdit, onDelete }) {
           {client.phone && <span>📞 {client.phone}</span>}
         </div>
       )}
- 
+
       <div className="flex gap-2 mt-3 pt-3 border-t border-slate-100">
         <button onClick={e => { e.stopPropagation(); onEdit(client); }}
           className="flex-1 flex items-center justify-center gap-1.5 py-1.5 text-xs font-semibold text-indigo-600 bg-indigo-50 hover:bg-indigo-100 rounded-lg transition-all">
@@ -67,13 +67,13 @@ function ClientCard({ client, onSelect, onEdit, onDelete }) {
     </div>
   );
 }
- 
+
 const INPUT = "w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent";
- 
+
 export default function Clients() {
   const navigate  = useNavigate();
   const { setCurrentClient, firm } = useStore();
- 
+
   const [clients,      setClients]      = useState([]);
   const [loading,      setLoading]      = useState(true);
   const [showForm,     setShowForm]     = useState(false);
@@ -83,26 +83,26 @@ export default function Clients() {
   const [saving,       setSaving]       = useState(false);
   const [search,       setSearch]       = useState('');
   const [filterRegion, setFilterRegion] = useState('All');
- 
+
   const firmRegion = firm?.region || 'India';
   const [form, setForm] = useState({ ...BLANK, region: firmRegion });
- 
+
   useEffect(() => {
     clientAPI.list()
       .then(data => setClients(Array.isArray(data) ? data : []))
       .catch(() => toast.error('Failed to load clients'))
       .finally(() => setLoading(false));
   }, []);
- 
+
   const set = useCallback((k, v) => setForm(f => ({ ...f, [k]: v })), []);
   const regionCfg = useMemo(() => REGION_FIELDS[form.region] || REGION_FIELDS.India, [form.region]);
- 
+
   function openCreate() {
     setEditClient(null);
     setForm({ ...BLANK, region: firmRegion });
     setShowForm(true);
   }
- 
+
   function openEdit(client) {
     setEditClient(client);
     setForm({
@@ -113,17 +113,17 @@ export default function Clients() {
     });
     setShowForm(true);
   }
- 
+
   function closeForm() {
     setShowForm(false);
     setEditClient(null);
     setForm({ ...BLANK, region: firmRegion });
   }
- 
+
   async function handleSubmit(e) {
     e.preventDefault();
     if (!form.name.trim()) { toast.error('Company name is required'); return; }
- 
+
     if (form.region === 'India') {
       if (!form.pan.trim())  { toast.error('PAN is required for Indian clients'); return; }
       if (!form.cin.trim())  { toast.error('CIN is required for Indian clients'); return; }
@@ -132,7 +132,7 @@ export default function Clients() {
       if (!form.tradeLicense.trim()) { toast.error('Trade License No. is required for UAE clients'); return; }
       if (!form.vatNumber.trim())    { toast.error('VAT Registration No. is required for UAE clients'); return; }
     }
- 
+
     const payload = {
       name: form.name.trim(), region: form.region,
       address: form.address || '', email: form.email.trim(), phone: form.phone.trim(),
@@ -142,7 +142,7 @@ export default function Clients() {
       tradeLicense: form.tradeLicense?.trim().toUpperCase() || '',
       vatNumber: form.vatNumber?.trim() || '',
     };
- 
+
     setSaving(true);
     try {
       if (editClient) {
@@ -159,7 +159,7 @@ export default function Clients() {
       toast.error(err?.error || err?.message || 'Failed to save client');
     } finally { setSaving(false); }
   }
- 
+
   async function handleDelete() {
     if (!deleteClient) return;
     setDeleting(true);
@@ -172,7 +172,7 @@ export default function Clients() {
       toast.error(err?.error || 'Cannot delete — client may have active engagements');
     } finally { setDeleting(false); }
   }
- 
+
   const filtered = clients.filter(c => {
     const q = search.toLowerCase();
     const matchSearch = !q || c.name?.toLowerCase().includes(q) ||
@@ -180,10 +180,10 @@ export default function Clients() {
     const matchRegion = filterRegion === 'All' || c.region === filterRegion;
     return matchSearch && matchRegion;
   });
- 
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50/20 p-8">
- 
+
       {/* Header */}
       <div className="flex items-center justify-between mb-8">
         <div>
@@ -195,7 +195,7 @@ export default function Clients() {
           <span className="text-lg">+</span> New Client
         </button>
       </div>
- 
+
       {/* Filters */}
       <div className="flex gap-3 mb-6 flex-wrap">
         <div className="relative flex-1 min-w-48">
@@ -213,7 +213,7 @@ export default function Clients() {
           ))}
         </div>
       </div>
- 
+
       {/* Form */}
       {showForm && (
         <div className="mb-8 bg-white border border-slate-200 rounded-3xl p-6 shadow-xl">
@@ -221,7 +221,7 @@ export default function Clients() {
             <h2 className="text-lg font-bold text-slate-900">{editClient ? 'Edit Client' : 'New Client'}</h2>
             <button onClick={closeForm} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
           </div>
- 
+
           <form onSubmit={handleSubmit}>
             <div className="mb-5">
               <label className="block text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Client Region</label>
@@ -237,7 +237,7 @@ export default function Clients() {
                 ))}
               </div>
             </div>
- 
+
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">Company / Entity Name *</label>
@@ -245,7 +245,7 @@ export default function Clients() {
                   onChange={e => set('name', e.target.value)} className={INPUT}
                   placeholder={form.region==='UAE'?'ABC Trading LLC':'Acme Private Limited'} />
               </div>
- 
+
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">{regionCfg.idLabel} *</label>
                 <input value={form.region==='UAE'?form.tradeLicense:form.cin}
@@ -284,7 +284,7 @@ export default function Clients() {
                   placeholder={form.region==='UAE'?'Office 401, Business Bay, Dubai':'123 Main Street, Mumbai - 400001'} />
               </div>
             </div>
- 
+
             <div className="flex gap-3 mt-6">
               <button type="submit" disabled={saving}
                 className="px-6 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 disabled:opacity-50 transition-all shadow-md">
@@ -298,7 +298,7 @@ export default function Clients() {
           </form>
         </div>
       )}
- 
+
       {/* Client list */}
       {loading ? (
         <div className="text-center py-16 text-slate-400">Loading...</div>
@@ -324,7 +324,7 @@ export default function Clients() {
           ))}
         </div>
       )}
- 
+
       {/* Delete confirmation modal */}
       {deleteClient && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">

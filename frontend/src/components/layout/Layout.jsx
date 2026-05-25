@@ -31,13 +31,11 @@ export default function Layout() {
     : (method === 'AS' || method === 'IND_AS') ? 'INR'
     : (currentClient?.region === 'UAE') ? 'AED' : 'INR';
   const region = currency === 'AED' ? 'UAE' : (currentClient?.region || firm?.region || 'India');
-  const flag   = region === 'UAE' ? '🇦🇪' : '🇮🇳';
-
   const navItems = [
     { to: '/',        icon: LayoutDashboard, label: 'Dashboard', exact: true },
     { to: '/clients', icon: Users,           label: 'Clients' },
     ...(eid ? [
-      { divider: `${flag} ${currentClient?.name || 'Engagement'}` },
+      { divider: currentClient?.name || 'Engagement' },
       { to: `/engagements/${eid}/tb`,         icon: Upload,         label: 'Trial Balance' },
       { to: `/engagements/${eid}/mapping`,    icon: Link2,          label: 'Mapping' },
       { to: `/engagements/${eid}/fs`,         icon: FileSpreadsheet,label: 'Financials' },

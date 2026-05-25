@@ -3,40 +3,40 @@ import { useNavigate, Link } from 'react-router-dom';
 import { authAPI } from '../api/client';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
- 
+
 const BG_IMAGES = [
   'https://images.unsplash.com/photo-1486406146926-c627a92ad1ab?w=1920&q=85&fit=crop',
   'https://images.unsplash.com/photo-1454165804606-c3d57bc86b40?w=1920&q=85&fit=crop',
   'https://images.unsplash.com/photo-1560472354-b33ff0c44a43?w=1920&q=85&fit=crop',
 ];
- 
+
 const REGION_CONFIG = {
   India: {
-    flag: '🇮🇳', methods: ['AS', 'IND_AS'], currency: 'INR',
+    methods: ['AS', 'IND_AS'], currency: 'INR',
     methodLabels: { AS: 'AS — Companies Act 2013', IND_AS: 'Ind AS — IFRS Converged' },
     phonePlaceholder: '+91 98765 43210',
   },
   UAE: {
-    flag: '🇦🇪', methods: ['IFRS', 'IFRS_SME'], currency: 'AED',
+    methods: ['IFRS', 'IFRS_SME'], currency: 'AED',
     methodLabels: { IFRS: 'IFRS — Full Standards', IFRS_SME: 'IFRS SME — Simplified' },
     phonePlaceholder: '+971 50 000 0000',
   },
 };
- 
+
 const INPUT = "w-full px-4 py-2.5 bg-white border border-slate-200 rounded-xl text-sm text-slate-900 placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-400 transition-all";
- 
+
 export default function Register() {
   const navigate    = useNavigate();
   const { setAuth } = useStore();
   const fileRef     = useRef();
- 
+
   const [step,    setStep]    = useState(0);
   const [loading, setLoading] = useState(false);
   const [showPass, setShowPass] = useState(false);
   const [bgIdx,   setBgIdx]   = useState(0);
   const [fading,  setFading]  = useState(false);
   const [preview, setPreview] = useState(null);
- 
+
   const [form, setForm] = useState({
     firmName: '', region: 'India', method: 'AS',
     name: '', email: '', password: '', confirmPass: '',
@@ -44,7 +44,7 @@ export default function Register() {
   });
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
   const cfg = REGION_CONFIG[form.region];
- 
+
   // Rotate background
   React.useEffect(() => {
     const t = setInterval(() => {
@@ -53,7 +53,7 @@ export default function Register() {
     }, 4000);
     return () => clearInterval(t);
   }, []);
- 
+
   function handleAvatar(e) {
     const file = e.target.files[0];
     if (!file) return;
@@ -62,12 +62,12 @@ export default function Register() {
     reader.onload = ev => { setPreview(ev.target.result); set('avatar', ev.target.result); };
     reader.readAsDataURL(file);
   }
- 
+
   function handleRegion(r) {
     set('region', r);
     set('method', REGION_CONFIG[r].methods[0]);
   }
- 
+
   async function nextStep(e) {
     e.preventDefault();
     if (step === 0) {
@@ -95,18 +95,18 @@ export default function Register() {
       } finally { setLoading(false); }
     }
   }
- 
+
   const passStrength = form.password.length === 0 ? 0
     : form.password.length < 6 ? 1
     : form.password.length < 8 ? 2
     : form.password.match(/[A-Z]/) && form.password.match(/[0-9]/) ? 4 : 3;
- 
+
   const strengthColor = ['', 'bg-red-400', 'bg-amber-400', 'bg-yellow-400', 'bg-emerald-500'];
   const strengthLabel = ['', 'Weak', 'Fair', 'Good', 'Strong'];
- 
+
   return (
     <div className="min-h-screen flex overflow-hidden">
- 
+
       {/* ── LEFT: Background ─────────────────────────────────────────── */}
       <div className="hidden lg:flex lg:flex-1 relative overflow-hidden">
         <div className="absolute inset-0 bg-cover bg-center transition-all duration-700"
@@ -114,7 +114,7 @@ export default function Register() {
         <div className="absolute inset-0 bg-gradient-to-br from-slate-900/85 via-slate-800/65 to-indigo-900/75" />
         <div className="absolute inset-0 opacity-10"
           style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.05) 1px, transparent 1px)', backgroundSize: '40px 40px' }} />
- 
+
         <div className="relative z-10 flex flex-col justify-between p-12 w-full">
           {/* Logo */}
           <div className="flex items-center gap-3">
@@ -128,7 +128,7 @@ export default function Register() {
               <p className="text-white/50 text-xs tracking-widest uppercase">Professional</p>
             </div>
           </div>
- 
+
           {/* Value props */}
           <div>
             <h2 className="text-4xl font-bold text-white mb-4 leading-tight">
@@ -152,11 +152,11 @@ export default function Register() {
           </div>
         </div>
       </div>
- 
+
       {/* ── RIGHT: Register Panel ─────────────────────────────────────── */}
       <div className="w-full lg:w-[520px] flex-shrink-0 flex flex-col justify-center px-8 md:px-12 bg-gradient-to-br from-slate-50 to-blue-50/40 overflow-y-auto py-10">
         <div className="relative max-w-sm mx-auto w-full">
- 
+
           {/* Mobile logo */}
           <div className="flex items-center gap-3 mb-8 lg:hidden">
             <div className="w-9 h-9 rounded-xl bg-indigo-600 flex items-center justify-center">
@@ -166,13 +166,13 @@ export default function Register() {
             </div>
             <p className="text-slate-900 font-bold text-lg">FinStatement</p>
           </div>
- 
+
           {/* Header */}
           <div className="mb-6">
             <h1 className="text-2xl font-bold text-slate-900 mb-1">Create your account</h1>
             <p className="text-slate-500 text-sm">Get started in under 2 minutes</p>
           </div>
- 
+
           {/* Step indicator */}
           <div className="flex items-center gap-2 mb-7">
             {['Firm Setup', 'Your Profile', 'Done'].map((s, i) => (
@@ -191,7 +191,7 @@ export default function Register() {
               </React.Fragment>
             ))}
           </div>
- 
+
           {/* ── STEP 0: Firm Setup ── */}
           {step === 0 && (
             <form onSubmit={nextStep} className="space-y-5">
@@ -205,7 +205,6 @@ export default function Register() {
                           ? 'border-indigo-500 bg-indigo-50'
                           : 'border-slate-200 bg-white hover:border-slate-300'
                       }`}>
-                      <span className="text-2xl">{rc.flag}</span>
                       <div>
                         <p className={`text-sm font-bold ${form.region === r ? 'text-indigo-700' : 'text-slate-800'}`}>{r}</p>
                         <p className="text-xs text-slate-400">{rc.currency}</p>
@@ -214,7 +213,7 @@ export default function Register() {
                   ))}
                 </div>
               </div>
- 
+
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">Firm / Practice Name</label>
                 <input required value={form.firmName}
@@ -222,7 +221,7 @@ export default function Register() {
                   className={INPUT}
                   placeholder={form.region === 'UAE' ? 'XYZ Audit LLC' : 'M/s XYZ & Associates'} />
               </div>
- 
+
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-2">Accounting Standard</label>
                 <div className="grid grid-cols-2 gap-2">
@@ -239,19 +238,19 @@ export default function Register() {
                   ))}
                 </div>
               </div>
- 
+
               <button type="submit"
                 className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl transition-all shadow-md shadow-indigo-500/20">
                 Continue →
               </button>
- 
+
               <p className="text-center text-sm text-slate-500">
                 Already have an account?{' '}
                 <Link to="/login" className="text-indigo-600 font-semibold hover:text-indigo-700">Sign in</Link>
               </p>
             </form>
           )}
- 
+
           {/* ── STEP 1: Profile ── */}
           {step === 1 && (
             <form onSubmit={nextStep} className="space-y-4">
@@ -262,7 +261,7 @@ export default function Register() {
                 </svg>
                 Back
               </button>
- 
+
               {/* Avatar */}
               <div className="flex items-center gap-4 p-4 bg-white rounded-xl border border-slate-200">
                 <div className="w-16 h-16 rounded-xl overflow-hidden border-2 border-slate-200 bg-slate-100 flex items-center justify-center cursor-pointer hover:border-indigo-400 transition-all flex-shrink-0"
@@ -284,7 +283,7 @@ export default function Register() {
                 </div>
                 <input ref={fileRef} type="file" accept="image/*" onChange={handleAvatar} className="hidden" />
               </div>
- 
+
               <div className="grid grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-semibold text-slate-600 mb-1.5">Full Name *</label>
@@ -297,19 +296,19 @@ export default function Register() {
                     className={INPUT} placeholder="Partner / Manager" />
                 </div>
               </div>
- 
+
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">Email Address *</label>
                 <input required type="email" value={form.email} onChange={e => set('email', e.target.value)}
                   className={INPUT} placeholder="you@yourfirm.com" />
               </div>
- 
+
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">Phone Number</label>
                 <input type="tel" value={form.phone} onChange={e => set('phone', e.target.value)}
                   className={INPUT} placeholder={cfg.phonePlaceholder} />
               </div>
- 
+
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">Password *</label>
                 <div className="relative">
@@ -337,7 +336,7 @@ export default function Register() {
                   </div>
                 )}
               </div>
- 
+
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">Confirm Password *</label>
                 <input required type="password" value={form.confirmPass}
@@ -350,7 +349,7 @@ export default function Register() {
                   <p className="text-emerald-600 text-xs mt-1">✓ Passwords match</p>
                 )}
               </div>
- 
+
               <button type="submit" disabled={loading}
                 className="w-full py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold text-sm rounded-xl transition-all shadow-md shadow-indigo-500/20 disabled:opacity-50 flex items-center justify-center gap-2">
                 {loading ? (
@@ -363,14 +362,14 @@ export default function Register() {
                   </>
                 ) : 'Create Account'}
               </button>
- 
+
               <p className="text-center text-sm text-slate-500">
                 Already have an account?{' '}
                 <Link to="/login" className="text-indigo-600 font-semibold hover:text-indigo-700">Sign in</Link>
               </p>
             </form>
           )}
- 
+
           {/* ── STEP 2: Success ── */}
           {step === 2 && (
             <div className="text-center py-10">
@@ -387,7 +386,7 @@ export default function Register() {
               </div>
             </div>
           )}
- 
+
           {/* Security note */}
           {step < 2 && (
             <div className="flex items-center justify-center gap-2 mt-6 text-xs text-slate-400">
