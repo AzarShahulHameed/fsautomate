@@ -116,7 +116,7 @@ router.delete('/:id', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, nex
   try {
     // Check if client has active engagements
     const engagements = await prisma.$queryRawUnsafe(
-      `SELECT id FROM "Engagement" WHERE "clientId"=$1 AND status != 'ARCHIVED' LIMIT 1`,
+      `SELECT id FROM "Engagement" WHERE "clientId"=$1 AND "isActive"=true LIMIT 1`,
       req.params.id
     );
     if (engagements.length) {

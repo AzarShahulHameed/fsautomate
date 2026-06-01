@@ -149,7 +149,7 @@ router.patch('/:engagementId', engagementGuard, requireRole('FIRM_ADMIN', 'MANAG
 router.delete('/:engagementId', engagementGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
   try {
     await prisma.$executeRawUnsafe(
-      `UPDATE "Engagement" SET status='ARCHIVED', "updatedAt"=NOW()
+      `UPDATE "Engagement" SET "isActive"=false, "updatedAt"=NOW()
        WHERE id=$1 AND "clientId" IN (SELECT id FROM "Client" WHERE "firmId"=$2)`,
       req.params.engagementId, req.firmId
     );
