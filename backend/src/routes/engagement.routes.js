@@ -25,9 +25,23 @@ router.get('/client/:clientId', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    const { clientId, name, method, financialYear, currency } = req.body;
-    const client = await prisma.client.findFirst({ where: { id: clientId, firmId: req.firmId } });
-    if (!client) return res.status(404).json({ error: 'Client not found' });
+    // Support both { clientId, name, ... } and nested { clientId: { clientId, ... } }
+    let body = req.body;
+    // If clientId is an object (old API mismatch), extract from it
+    if (body.clientId && typeof body.clientId === 'object') {
+      body = { ...body.clientId, ...body };
+    }
+    const { clientId, name, method, financialYear, currency } = body;
+
+    if (!clientId || typeof clientId !== 'string') {
+      return res.status(400).json({ error: 'clientId is required and must be a string' });
+    }
+
+    const client = await prisma.$queryRawUnsafe(
+      `SELECT id FROM "Client" WHERE id=$1 AND "firmId"=$2 AND "isActive"=true LIMIT 1`,
+      clientId, req.firmId
+    );
+    if (!client.length) return res.status(404).json({ error: 'Client not found' });
 
     const engagement = await prisma.engagement.create({
       data: { clientId, name, method, financialYear, currency: currency || 'INR' },
