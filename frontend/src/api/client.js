@@ -1,6 +1,6 @@
 // src/api/client.js
 import axios from 'axios';
-
+ 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL
     ? `${import.meta.env.VITE_API_BASE_URL}/api`
@@ -10,7 +10,7 @@ const api = axios.create({
   withCredentials: true,  // Sends session cookie
   timeout: 60000,
 });
-
+ 
 // Attach stored JWT token on every request
 api.interceptors.request.use((config) => {
   try {
@@ -24,7 +24,7 @@ api.interceptors.request.use((config) => {
   } catch (_) {}
   return config;
 });
-
+ 
 // Handle 401 globally — clear session and go to login
 api.interceptors.response.use(
   (res) => res.data,  // Unwrap .data so callers get objects directly
@@ -36,9 +36,9 @@ api.interceptors.response.use(
     return Promise.reject(err?.response?.data || err);
   }
 );
-
+ 
 export default api;
-
+ 
 // ─── Auth API ─────────────────────────────────────────────────────────────
 export const authAPI = {
   login:          (data) => api.post('/auth/login', data),
@@ -53,7 +53,7 @@ export const authAPI = {
   forgotPassword:   (data) => api.post('/auth/forgot-password', data),
   resetPassword:    (data) => api.post('/auth/reset-password', data),
 };
-
+ 
 // ─── Client API ───────────────────────────────────────────────────────────
 export const clientAPI = {
   list:   ()         => api.get('/clients'),
@@ -62,19 +62,19 @@ export const clientAPI = {
   update: (id, data) => api.put(`/clients/${id}`, data),
   delete: (id)       => api.delete(`/clients/${id}`),
 };
-
+ 
 // ─── Engagement API ───────────────────────────────────────────────────────
 export const engagementAPI = {
   list:       (clientId) => api.get(`/engagements/client/${clientId}`),
   update:     (id, data) => api.patch(`/engagements/${id}`, data),
   delete:     (id)       => api.delete(`/engagements/${id}`),
   get:        (id)       => api.get(`/engagements/${id}`),
-  create:     (clientId, data) => api.post('/engagements', { ...data, clientId }),
+  create:     (data)           => api.post('/engagements', data),
   lock:       (id, lock) => api.patch(`/engagements/${id}/lock`, { lock }),
   validation:    (id) => api.get(`/engagements/${id}/validation-checks`),
   runValidation: (id) => api.post(`/engagements/${id}/validation-checks`),
 };
-
+ 
 // ─── Trial Balance API ────────────────────────────────────────────────────
 export const tbAPI = {
   upload: (eid, file) => {
@@ -89,7 +89,7 @@ export const tbAPI = {
   versions: (eid)         => api.get(`/tb/${eid}/versions`),
   diff:     (eid, vid)    => api.get(`/tb/${eid}/versions/${vid}/diff`),
 };
-
+ 
 // ─── Mapping API ──────────────────────────────────────────────────────────
 export const mappingAPI = {
   status:  (eid)       => api.get(`/mapping/${eid}/status`),
@@ -97,19 +97,19 @@ export const mappingAPI = {
   save:    (eid, data) => api.put(`/mapping/${eid}/manual`, data),
   master:  (method, search) => api.get(`/mapping/master`, { params: { method, search } }),
 };
-
+ 
 // ─── Financial Statements API ─────────────────────────────────────────────
 export const fsAPI = {
   generate: (eid) => api.post(`/fs/${eid}/generate`, {}, { timeout: 120000 }),
   get:      (eid) => api.get(`/fs/${eid}`),
 };
-
+ 
 // ─── Notes API ────────────────────────────────────────────────────────────
 export const notesAPI = {
   generate: (eid) => api.post(`/notes/${eid}/generate`),
   get:      (eid) => api.get(`/notes/${eid}`),
 };
-
+ 
 // ─── Report API ───────────────────────────────────────────────────────────
 export const reportAPI = {
   sections:    (eid)            => api.get(`/report/${eid}/sections`),
@@ -117,10 +117,10 @@ export const reportAPI = {
   toggleVis:   (eid, sid, v)   => api.patch(`/report/${eid}/sections/${sid}/visibility`, { isVisible: v }),
   reorder:     (eid, order)    => api.patch(`/report/${eid}/sections/reorder`, { order }),
 };
-
+ 
 // ─── Export API (blob responses — bypass interceptor) ─────────────────────
 const BASE = import.meta.env.VITE_API_BASE_URL || (window.location.hostname === 'localhost' ? 'http://localhost:4000' : 'https://fsautomate.onrender.com');
-
+ 
 function authHeader() {
   try {
     const raw = localStorage.getItem('finstatement-auth');
@@ -131,20 +131,20 @@ function authHeader() {
   } catch (_) {}
   return {};
 }
-
+ 
 // ─── Upload API ───────────────────────────────────────────────────────────────
 // ─── Preferences API ─────────────────────────────────────────────────────────
 export const prefsAPI = {
   get:  ()     => api.get('/preferences'),
   save: (data) => api.patch('/preferences', data),
 };
-
+ 
 // ─── OTP API ──────────────────────────────────────────────────────────────────
 export const otpAPI = {
   send:   (type, target)       => api.post('/otp/send', { type, target }),
   verify: (type, target, otp)  => api.post('/otp/verify', { type, target, otp }),
 };
-
+ 
 export const uploadAPI = {
   avatar: (file) => {
     const fd = new FormData();
@@ -154,7 +154,7 @@ export const uploadAPI = {
     });
   },
 };
-
+ 
 export const exportAPI = {
   word:  (eid) => axios.get(
     `${BASE}/api/export/${eid}/word`,
