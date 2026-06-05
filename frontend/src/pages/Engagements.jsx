@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useStore } from '../store';
-import { engagementAPI } from '../api/client';
+import { engagementAPI, mappingAPI } from '../api/client';
 import { ArrowRight, Building2, Calendar, BookOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -83,6 +83,36 @@ export default function Engagements() {
       .catch(() => toast.error('Failed to load engagements'));
   }, [clientId]);
 
+  async function advanceStatus(engagement) {
+    const cfg = STATUS_CONFIG[engagement.status || 'DRAFT'];
+    if (!cfg?.next) return;
+    try {
+      await engagementAPI.setStatus(engagement.id, cfg.next);
+      toast.success(`Status updated to ${STATUS_CONFIG[cfg.next]?.label}`);
+      load();
+    } catch (err) {
+      toast.error(err?.error || err?.response?.data?.error || 'Status update failed');
+    }
+  }
+
+  async function deleteEngagement(id, name) {
+    if (!window.confirm(`Delete "${name}"? This can be recovered by an admin.`)) return;
+    try {
+      await engagementAPI.delete(id);
+      toast.success('Engagement deleted');
+      load();
+    } catch (err) {
+      toast.error(err?.error || err?.response?.data?.error || 'Delete failed');
+    }
+  }
+
+  async function copyMappings(targetId, sourceId) {
+    try {
+      const result = await mappingAPI.copyFrom(targetId, sourceId);
+      toast.success(result?.message || `Copied ${result?.copied} mappings`);
+    } catch { toast.error('Copy failed'); }
+  }
+
   async function create() {
     if (!form.name) { toast.error('Engagement name is required'); return; }
     try {
@@ -91,7 +121,21 @@ export default function Engagements() {
       setShowNew(false);
       setForm({ name:'', method:regionCfg.methods[0], financialYear:regionCfg.fyOptions[0], currency:regionCfg.currency });
       toast.success('Engagement created');
-    } catch { toast.error('Failed to create engagement'); }
+    } catch (err) {
+      if (err?.status === 409 || err?.response?.status === 409) {
+        const existingId = err?.existingId || err?.response?.data?.existingId;
+        toast.error(
+          err?.error || err?.response?.data?.error || 'Engagement already exists for this year and method',
+          { duration: 6000 }
+        );
+        if (existingId) {
+          // Navigate to existing engagement
+          navigate(`/engagements/${existingId}/tb`);
+        }
+      } else {
+        toast.error('Failed to create engagement');
+      }
+    }
   }
 
   function open(e) {
@@ -99,7 +143,16 @@ export default function Engagements() {
     navigate(`/engagements/${e.id}/tb`);
   }
 
-  const methodBadgeColor = {
+  
+const STATUS_CONFIG = {
+  DRAFT:        { label: 'Draft',        color: 'bg-slate-100 text-slate-600',   next: 'IN_PROGRESS',  nextLabel: 'Start Work' },
+  IN_PROGRESS:  { label: 'In Progress',  color: 'bg-blue-100 text-blue-700',     next: 'UNDER_REVIEW', nextLabel: 'Submit for Review' },
+  UNDER_REVIEW: { label: 'Under Review', color: 'bg-amber-100 text-amber-700',   next: 'LOCKED',       nextLabel: 'Approve & Lock' },
+  LOCKED:       { label: 'Locked',       color: 'bg-emerald-100 text-emerald-700', next: 'FILED',      nextLabel: 'Mark as Filed' },
+  FILED:        { label: 'Filed',        color: 'bg-purple-100 text-purple-700', next: null,           nextLabel: null },
+};
+
+const methodBadgeColor = {
     AS: 'bg-blue-100 text-blue-700',
     IND_AS: 'bg-purple-100 text-purple-700',
     IFRS: 'bg-emerald-100 text-emerald-700',

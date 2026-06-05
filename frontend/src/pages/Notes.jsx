@@ -39,11 +39,14 @@ export default function Notes() {
     { label: `${currSymbol} Crores`,   value: 10000000 },
   ];
 
-  const [notes,       setNotes]       = useState([]);
-  const [loading,     setLoading]     = useState(true);
-  const [unit,        setUnit]        = useState(UNITS[0]);
-  const [breakupOn,   setBreakupOn]   = useState({});   // noteGroupId → bool (toggle)
-  const [ledgerOpen,  setLedgerOpen]  = useState({});   // subGroupName key → bool
+  const [notes,        setNotes]        = useState([]);
+  const [loading,      setLoading]      = useState(true);
+  const [unit,         setUnit]         = useState(UNITS[0]);
+  const [breakupOn,    setBreakupOn]    = useState({});
+  const [ledgerOpen,   setLedgerOpen]   = useState({});
+  const [editingContent, setEditingContent] = useState(null); // noteGroupId being edited
+  const [contentDraft,   setContentDraft]   = useState('');
+  const [savingContent,  setSavingContent]  = useState(false);
 
   useEffect(() => { load(); }, [engagementId]);
 
@@ -63,6 +66,24 @@ export default function Notes() {
       toast.success('Notes generated');
       load();
     } catch (err) { toast.error(err?.error || 'Failed — generate FS first'); }
+  }
+
+  async function saveContent(noteGroupId) {
+    setSavingContent(true);
+    try {
+      await notesAPI.saveContent(engagementId, noteGroupId, contentDraft);
+      setNotes(prev => prev.map(n =>
+        n.noteGroupId === noteGroupId ? { ...n, noteContent: contentDraft } : n
+      ));
+      setEditingContent(null);
+      toast.success('Disclosure saved');
+    } catch { toast.error('Failed to save'); }
+    finally { setSavingContent(false); }
+  }
+
+  function startEditContent(note) {
+    setEditingContent(note.noteGroupId);
+    setContentDraft(note.noteContent || '');
   }
 
   function fmt(n) {
@@ -256,6 +277,44 @@ export default function Notes() {
                         </tr>
                       </tfoot>
                     </table>
+                  </div>
+                )}
+
+                {/* ── Disclosure text content ── */}
+                {editingContent === note.noteGroupId ? (
+                  <div className="px-5 py-3 border-t border-slate-100">
+                    <label className="block text-xs font-semibold text-slate-600 mb-1.5">
+                      Disclosure Text <span className="font-normal text-slate-400">(shown above the note table in Word export)</span>
+                    </label>
+                    <textarea
+                      value={contentDraft}
+                      onChange={e => setContentDraft(e.target.value)}
+                      rows={4}
+                      placeholder="e.g. Trade receivables are unsecured and considered good unless stated otherwise..."
+                      className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 resize-none"
+                    />
+                    <div className="flex gap-2 mt-2">
+                      <button onClick={() => saveContent(note.noteGroupId)} disabled={savingContent}
+                        className="px-3 py-1.5 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700 disabled:opacity-50">
+                        {savingContent ? 'Saving...' : '💾 Save'}
+                      </button>
+                      <button onClick={() => setEditingContent(null)}
+                        className="px-3 py-1.5 border border-slate-300 text-xs rounded-lg text-slate-600 hover:bg-slate-50">
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="px-5 pb-3 border-t border-slate-100 pt-2 flex items-start justify-between gap-2">
+                    {note.noteContent ? (
+                      <p className="text-xs text-slate-600 italic flex-1">{note.noteContent}</p>
+                    ) : (
+                      <p className="text-xs text-slate-400 italic flex-1">No disclosure text — click Edit to add</p>
+                    )}
+                    <button onClick={() => startEditContent(note)}
+                      className="text-xs text-indigo-500 hover:text-indigo-700 flex-shrink-0 underline">
+                      {note.noteContent ? 'Edit' : '+ Add disclosure'}
+                    </button>
                   </div>
                 )}
 

@@ -1,12 +1,12 @@
 // server.js — FinStatement SaaS backend entry point
 'use strict';
- 
+
 const express   = require('express');
 const helmet    = require('helmet');
 const cors      = require('cors');
 const rateLimit = require('express-rate-limit');
 const session   = require('express-session');
- 
+
 const { prisma }          = require('./src/config/db');
 const { auditMiddleware } = require('./src/middleware/audit');
 const authRoutes          = require('./src/routes/auth.routes');
@@ -20,10 +20,11 @@ const reportRoutes        = require('./src/routes/report.routes');
 const exportRoutes        = require('./src/routes/export.routes');
 const schedulesRoutes     = require('./src/routes/schedules.routes');
 const uploadRoutes        = require('./src/routes/upload.routes');
- 
+const oauthRoutes         = require('./src/routes/oauth.routes');
+
 const app  = express();
 const PORT = process.env.PORT || 4000;
- 
+
 // ── Fail fast on missing required secrets ─────────────────────────────────
 if (process.env.NODE_ENV === 'production') {
   const REQUIRED_ENV = ['JWT_SECRET', 'SESSION_SECRET', 'DATABASE_URL'];
@@ -33,10 +34,10 @@ if (process.env.NODE_ENV === 'production') {
     process.exit(1);
   }
 }
- 
+
 // Required for Render/Vercel reverse proxy — fixes rate limiting and cookies
 app.set('trust proxy', 1);
- 
+
 // ─── Security headers ──────────────────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: {
@@ -48,7 +49,7 @@ app.use(helmet({
     },
   },
 }));
- 
+
 // ─── CORS ──────────────────────────────────────────────────────────────────
 const allowedOrigins = [
   'http://localhost:5173',
@@ -73,11 +74,11 @@ app.use(cors({
 }));
 // Handle preflight for all routes
 app.options('*', cors());
- 
+
 // ─── Body parsing ──────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
- 
+
 // ─── Session — Redis-backed with in-memory fallback ────────────────────────
 // Redis: survives Render restarts, shared across instances.
 // Fallback: in-memory store for local dev (no Redis needed locally).
@@ -97,7 +98,7 @@ if (process.env.REDIS_URL) {
 } else {
   console.log('[Session] No REDIS_URL — using in-memory store (not suitable for production multi-instance)');
 }
- 
+
 app.use(session({
   store:             sessionStore, // undefined = default MemoryStore
   secret:            process.env.SESSION_SECRET || 'finstatement-dev-secret',
@@ -111,7 +112,7 @@ app.use(session({
     maxAge:   8 * 60 * 60 * 1000, // 8 hours
   },
 }));
- 
+
 // ─── Rate limiting — keyed by firmId for multi-tenant fairness ─────────────
 // Auth routes: IP-based (firmId not yet available before login)
 app.use('/api/auth', rateLimit({
@@ -119,7 +120,7 @@ app.use('/api/auth', rateLimit({
   max:      30,
   message:  'Too many auth attempts. Try again in 15 minutes.',
 }));
- 
+
 // API routes: firmId-based so one firm cannot starve another
 app.use('/api', rateLimit({
   windowMs: 60 * 1000,
@@ -127,13 +128,13 @@ app.use('/api', rateLimit({
   keyGenerator: (req) => req.firmId || req.ip, // firmId set by authGuard
   skip: (req) => req.method === 'OPTIONS',
 }));
- 
+
 // ─── Audit logging ─────────────────────────────────────────────────────────
 app.use(auditMiddleware);
- 
+
 // ─── Health check ──────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
- 
+
 // ─── API Routes ────────────────────────────────────────────────────────────
 app.use('/api/auth',        authRoutes);
 app.use('/api/clients',     clientRoutes);
@@ -146,10 +147,11 @@ app.use('/api/report',      reportRoutes);
 app.use('/api/export',      exportRoutes);
 app.use('/api/schedules',   schedulesRoutes);
 app.use('/api/upload',      uploadRoutes);
- 
+app.use('/api/oauth',       oauthRoutes);
+
 // ─── 404 ───────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
- 
+
 // ─── Global error handler ──────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
   console.error('[ERROR]', err.message);
@@ -158,11 +160,11 @@ app.use((err, _req, res, _next) => {
     code:  err.code    || 'INTERNAL_ERROR',
   });
 });
- 
+
 // ─── Start ─────────────────────────────────────────────────────────────────
 app.listen(PORT, () => {
   console.log(`[FinStatement API] Listening on port ${PORT}`);
- 
+
   // Keep Neon warm — ping every 4 minutes to prevent cold-start latency for users.
   // Neon suspends compute after 5 minutes of inactivity; this prevents suspension.
   if (process.env.NODE_ENV === 'production') {
@@ -177,7 +179,7 @@ app.listen(PORT, () => {
     console.log('[Keepalive] Neon warm-ping active (every 4 min)');
   }
 });
- 
+
 process.on('SIGTERM', async () => {
   const { disconnectDB } = require('./src/config/db');
   await disconnectDB();
