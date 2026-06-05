@@ -1,25 +1,21 @@
 // src/services/mapping.service.js
 // ─────────────────────────────────────────────────────────────────────────────
-// MAPPING SERVICE
+// MAPPING SERVICE — now with Memory Intelligence Layer
 //
-// AS METHOD:
-//   - Loads master grouping table filtered by method_applicability IN (ALL, AS)
-//   - Auto-maps TB.subGrouping → master row via exact match
-//   - Falls back to TB.grouping if present
+// Auto-map priority order:
+//   1. Client-specific MappingMemory (≥ 60% confidence) → auto-apply
+//   2. Firm-wide MappingMemory       (≥ 60% confidence) → auto-apply
+//   3. Master table exact match
+//   4. Master table fuzzy/partial match
+//   5. IFRS keyword heuristics (IFRS method only)
+//   6. Flag as unmapped
 //
-// IND AS METHOD:
-//   - Uses same master table filtered by (ALL, IND_AS)
-//   - Includes OCI, SOCE, Financial instruments rows
-//
-// IFRS / IFRS SME:
-//   - No master table used
-//   - Auto-groups by keyword heuristics
-//   - User manually assigns FS heads via UI
-//   - Saved mappings are reused across versions
+// Manual saves → always write to MappingMemory so future engagements benefit
 // ─────────────────────────────────────────────────────────────────────────────
 'use strict';
 
 const { prisma } = require('../config/db');
+const memoryService = require('./mappingMemory.service');
 
 // Keywords for IFRS dynamic auto-grouping heuristics
 const IFRS_HEURISTICS = [
@@ -48,68 +44,100 @@ const IFRS_HEURISTICS = [
 
 /**
  * Load master grouping rows applicable for the given method.
- * Unified for AS + IND_AS via method_applicability column.
  */
 async function loadMasterGrouping(method) {
   const applicabilities = ['ALL'];
   if (['AS', 'IND_AS', 'IFRS', 'IFRS_SME'].includes(method)) {
     applicabilities.push(method);
   }
-
   return prisma.masterGrouping.findMany({
-    where: {
-      isActive: true,
-      methodApplicability: { in: applicabilities },
-    },
+    where: { isActive: true, methodApplicability: { in: applicabilities } },
     orderBy: { displayOrder: 'asc' },
   });
 }
 
 /**
- * AS / IND_AS: Auto-map TB subGroupings to master rows.
- * Creates Mapping records for any unmapped subGroupings.
- *
- * @param {string} engagementId
- * @param {string} method  — 'AS' | 'IND_AS'
+ * AS / IND_AS: Auto-map with memory layer first, then master table fallback.
  */
 async function autoMapFromMaster(engagementId, method) {
+  // Get engagement context for memory lookup
+  const engagement = await prisma.engagement.findUnique({
+    where: { id: engagementId },
+    include: { client: { select: { id: true, firmId: true } } },
+  });
+  if (!engagement) return { mapped: 0, unmapped: [] };
+
+  const firmId   = engagement.client.firmId;
+  const clientId = engagement.client.id;
+
   const masterRows = await loadMasterGrouping(method);
-  // Index by subGroupNo (exact) and subGroupName (fuzzy fallback)
   const masterBySubGroupNo   = new Map(masterRows.map(r => [r.subGroupNo.trim().toUpperCase(), r]));
   const masterBySubGroupName = new Map(masterRows.map(r => [r.subGroupName.trim().toUpperCase(), r]));
 
-  // Get latest TB rows
   const latest = await prisma.tBVersion.findFirst({
-    where: { engagementId },
+    where: { engagementId, isPriorYear: false },
     orderBy: { versionNumber: 'desc' },
     include: { rows: true },
   });
   if (!latest) return { mapped: 0, unmapped: [] };
 
-  // Get already-mapped subGroupings
   const existingMappings = await prisma.mapping.findMany({ where: { engagementId } });
-  const alreadyMapped = new Set(existingMappings.map(m => m.subGrouping.trim().toUpperCase()));
+  const alreadyMapped    = new Set(existingMappings.map(m => m.subGrouping.trim().toUpperCase()));
 
-  // Unique subGroupings not yet mapped
   const subGroupings = [...new Set(
     latest.rows
       .map(r => r.subGrouping.trim())
       .filter(sg => !alreadyMapped.has(sg.toUpperCase()))
   )];
 
+  if (subGroupings.length === 0) return { mapped: 0, unmapped: [] };
+
+  // ── Step 1: Check MappingMemory first ──────────────────────────────────────
+  const { autoMapped: memAutoMapped, suggested: memSuggested, stillUnmapped } =
+    await memoryService.applyMemoryToUnmapped(subGroupings, firmId, clientId, method);
+
   const toCreate = [];
   const unmapped = [];
 
-  for (const subGrouping of subGroupings) {
+  // Memory auto-mapped (high confidence) → create mappings directly
+  for (const item of memAutoMapped) {
+    toCreate.push({
+      engagementId,
+      subGrouping:      item.subGrouping,
+      groupName:        item.groupName,
+      subGroupName:     item.subGroupName,
+      subGroupNo:       item.subGroupNo,
+      noteGroupId:      item.noteGroupId,
+      masterGroupingId: item.masterGroupingId,
+      isManual:         false,
+      isSaved:          true,
+    });
+  }
+
+  // Memory suggested (medium confidence) → also auto-apply but flag as needing review
+  // We apply them now so the UI shows something rather than blank;
+  // the UI will surface these with a "memory suggestion" badge
+  for (const item of memSuggested) {
+    toCreate.push({
+      engagementId,
+      subGrouping:      item.subGrouping,
+      groupName:        item.groupName,
+      subGroupName:     item.subGroupName,
+      subGroupNo:       item.subGroupNo,
+      noteGroupId:      item.noteGroupId,
+      masterGroupingId: item.masterGroupingId,
+      isManual:         false,
+      isSaved:          true,
+    });
+  }
+
+  // ── Step 2: Remaining → try master table ───────────────────────────────────
+  for (const subGrouping of stillUnmapped) {
     const sgUpper = subGrouping.toUpperCase();
 
-    // 1. Try exact match on subGroupNo
     let master = masterBySubGroupNo.get(sgUpper);
-
-    // 2. Try exact match on subGroupName
     if (!master) master = masterBySubGroupName.get(sgUpper);
 
-    // 3. Try partial match on subGroupName
     if (!master) {
       for (const [key, row] of masterBySubGroupName) {
         if (key.includes(sgUpper) || sgUpper.includes(key)) {
@@ -119,7 +147,6 @@ async function autoMapFromMaster(engagementId, method) {
       }
     }
 
-    // 4. Fall back to TB.grouping if present in TB rows
     if (!master) {
       const tbGrouping = latest.rows.find(r => r.subGrouping.trim() === subGrouping)?.grouping;
       if (tbGrouping) {
@@ -144,6 +171,14 @@ async function autoMapFromMaster(engagementId, method) {
         isManual:         false,
         isSaved:          true,
       });
+
+      // Master table hits also write to memory so next time they skip the master lookup
+      await memoryService.recordMemory({
+        firmId, clientId: null, rawText: subGrouping,
+        groupName: master.groupName, subGroupName: master.subGroupName,
+        subGroupNo: master.subGroupNo, noteGroupId: master.noteGroupId,
+        masterGroupingId: master.id, method, engagementId,
+      });
     } else {
       unmapped.push(subGrouping);
     }
@@ -153,42 +188,75 @@ async function autoMapFromMaster(engagementId, method) {
     await prisma.mapping.createMany({ data: toCreate, skipDuplicates: true });
   }
 
-  return { mapped: toCreate.length, unmapped };
+  return {
+    mapped:      toCreate.length,
+    unmapped,
+    fromMemory:  memAutoMapped.length + memSuggested.length,
+    fromMaster:  toCreate.length - memAutoMapped.length - memSuggested.length,
+  };
 }
 
 /**
- * IFRS / IFRS_SME: Auto-group by keyword heuristics.
- * Creates Mapping records; user can override via UI later.
+ * IFRS / IFRS_SME: Memory first, then keyword heuristics.
  */
 async function autoMapIFRS(engagementId) {
+  const engagement = await prisma.engagement.findUnique({
+    where: { id: engagementId },
+    include: { client: { select: { id: true, firmId: true } } },
+  });
+  if (!engagement) return { mapped: 0, unmapped: [] };
+
+  const firmId   = engagement.client.firmId;
+  const clientId = engagement.client.id;
+  const method   = engagement.method;
+
   const latest = await prisma.tBVersion.findFirst({
-    where: { engagementId },
+    where: { engagementId, isPriorYear: false },
     orderBy: { versionNumber: 'desc' },
     include: { rows: true },
   });
   if (!latest) return { mapped: 0, unmapped: [] };
 
-  const existing = await prisma.mapping.findMany({ where: { engagementId } });
+  const existing     = await prisma.mapping.findMany({ where: { engagementId } });
   const alreadyMapped = new Set(existing.map(m => m.subGrouping.trim().toUpperCase()));
 
   const subGroupings = [...new Set(
     latest.rows.map(r => r.subGrouping.trim()).filter(sg => !alreadyMapped.has(sg.toUpperCase()))
   )];
 
+  if (subGroupings.length === 0) return { mapped: 0, unmapped: [] };
+
+  // ── Step 1: Memory check ───────────────────────────────────────────────────
+  const { autoMapped: memAutoMapped, suggested: memSuggested, stillUnmapped } =
+    await memoryService.applyMemoryToUnmapped(subGroupings, firmId, clientId, method);
+
   const toCreate = [];
   const unmapped = [];
 
-  for (const sg of subGroupings) {
-    const sgLower = sg.toLowerCase();
-    let matched = null;
+  for (const item of [...memAutoMapped, ...memSuggested]) {
+    toCreate.push({
+      engagementId,
+      subGrouping:      item.subGrouping,
+      groupName:        item.groupName,
+      subGroupName:     item.subGroupName,
+      subGroupNo:       item.subGroupNo,
+      noteGroupId:      item.noteGroupId,
+      masterGroupingId: item.masterGroupingId,
+      isManual:         false,
+      isSaved:          true,
+    });
+  }
 
-    // Check TB.grouping first (user might have provided it)
+  // ── Step 2: IFRS heuristics for remainder ─────────────────────────────────
+  for (const sg of stillUnmapped) {
+    const sgLower = sg.toLowerCase();
+    let matched   = null;
+
     const tbGrouping = latest.rows.find(r => r.subGrouping.trim() === sg)?.grouping;
     if (tbGrouping) {
       matched = { groupName: tbGrouping, assetLiability: guessAssetLiability(tbGrouping), sheet: guessSheet(tbGrouping) };
     }
 
-    // Keyword heuristic fallback
     if (!matched) {
       for (const rule of IFRS_HEURISTICS) {
         if (rule.keywords.some(kw => sgLower.includes(kw))) {
@@ -202,10 +270,17 @@ async function autoMapIFRS(engagementId) {
       toCreate.push({
         engagementId,
         subGrouping: sg,
-        groupName: matched.groupName,
+        groupName:   matched.groupName,
         subGroupName: sg,
-        isManual: false,
-        isSaved: true,
+        isManual:    false,
+        isSaved:     true,
+      });
+
+      // Write heuristic hits to memory too
+      await memoryService.recordMemory({
+        firmId, clientId: null, rawText: sg,
+        groupName: matched.groupName, subGroupName: sg,
+        method, engagementId,
       });
     } else {
       unmapped.push(sg);
@@ -216,7 +291,12 @@ async function autoMapIFRS(engagementId) {
     await prisma.mapping.createMany({ data: toCreate, skipDuplicates: true });
   }
 
-  return { mapped: toCreate.length, unmapped };
+  return {
+    mapped:      toCreate.length,
+    unmapped,
+    fromMemory:  memAutoMapped.length + memSuggested.length,
+    fromHeuristic: toCreate.length - memAutoMapped.length - memSuggested.length,
+  };
 }
 
 function guessAssetLiability(text) {
@@ -234,17 +314,43 @@ function guessSheet(text) {
 }
 
 /**
- * Save a single manual mapping override (user assignment via UI)
+ * Save a manual mapping + write to MappingMemory.
+ * This is the key write path — every human correction is remembered.
  */
 async function saveManualMapping(engagementId, body) {
-  // body = { subGrouping, groupName, subGroupName, subGroupNo, noteGroupId, masterGroupingId }
-  const { subGrouping, ...data } = body;
+  const { subGrouping, groupName, subGroupName, subGroupNo, noteGroupId, masterGroupingId } = body;
   if (!subGrouping) throw Object.assign(new Error('subGrouping is required'), { status: 400 });
-  return prisma.mapping.upsert({
+  if (!groupName)   throw Object.assign(new Error('groupName is required'),   { status: 400 });
+
+  // Save to Mapping table
+  const mapping = await prisma.mapping.upsert({
     where: { engagementId_subGrouping: { engagementId, subGrouping } },
-    update: { ...data, isManual: true, updatedAt: new Date() },
-    create: { engagementId, subGrouping, ...data, isManual: true, isSaved: true },
+    update: { groupName, subGroupName, subGroupNo, noteGroupId, masterGroupingId, isManual: true, updatedAt: new Date() },
+    create: { engagementId, subGrouping, groupName, subGroupName, subGroupNo, noteGroupId, masterGroupingId, isManual: true, isSaved: true },
   });
+
+  // ── Write to MappingMemory ─────────────────────────────────────────────────
+  // Get engagement context
+  const engagement = await prisma.engagement.findUnique({
+    where: { id: engagementId },
+    include: { client: { select: { id: true, firmId: true } } },
+  });
+
+  if (engagement) {
+    const firmId   = engagement.client.firmId;
+    const clientId = engagement.client.id;
+    const method   = engagement.method;
+
+    // Write client-specific memory (highest priority)
+    await memoryService.recordMemory({
+      firmId, clientId, rawText: subGrouping,
+      groupName, subGroupName, subGroupNo, noteGroupId, masterGroupingId,
+      method, engagementId,
+    });
+    // recordMemory also auto-writes firm-wide entry — see memoryService
+  }
+
+  return mapping;
 }
 
 /**
@@ -254,7 +360,7 @@ async function getMappingStatus(engagementId) {
   const [mappings, latest] = await Promise.all([
     prisma.mapping.findMany({ where: { engagementId }, orderBy: { groupName: 'asc' } }),
     prisma.tBVersion.findFirst({
-      where: { engagementId },
+      where: { engagementId, isPriorYear: false },
       orderBy: { versionNumber: 'desc' },
       include: { rows: { select: { subGrouping: true } } },
     }),
@@ -262,7 +368,7 @@ async function getMappingStatus(engagementId) {
 
   if (!latest) return { mappings, unmapped: [] };
 
-  const mapped = new Set(mappings.map(m => m.subGrouping.trim().toUpperCase()));
+  const mapped   = new Set(mappings.map(m => m.subGrouping.trim().toUpperCase()));
   const unmapped = [...new Set(
     latest.rows.map(r => r.subGrouping.trim()).filter(sg => !mapped.has(sg.toUpperCase()))
   )];
@@ -270,4 +376,10 @@ async function getMappingStatus(engagementId) {
   return { mappings, unmapped };
 }
 
-module.exports = { autoMapFromMaster, autoMapIFRS, saveManualMapping, getMappingStatus, loadMasterGrouping };
+module.exports = {
+  autoMapFromMaster,
+  autoMapIFRS,
+  saveManualMapping,
+  getMappingStatus,
+  loadMasterGrouping,
+};

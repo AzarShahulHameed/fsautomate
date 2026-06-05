@@ -1,256 +1,121 @@
-import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { mappingAPI, fsAPI, notesAPI, tbAPI } from '../api/client';
+import { mappingAPI, fsAPI, notesAPI, tbAPI, exportAPI } from '../api/client';
 import { useStore } from '../store';
- 
+
 const UNITS = [
   { label: 'Actual',     value: 1,        display: '' },
   { label: 'Hundreds',   value: 100,      display: '00s' },
   { label: 'Thousands',  value: 1000,     display: '000s' },
   { label: 'Lakhs',      value: 100000,   display: 'Lakhs' },
+  { label: 'Millions',   value: 1000000,  display: 'Millions' },
   { label: 'Crores',     value: 10000000, display: 'Crores' },
 ];
- 
+
 function fmtAmt(n, divisor = 1) {
   const num = Number(n || 0) / divisor;
   const abs = Math.abs(num);
   return (num < 0 ? '-' : '') + Math.round(abs).toLocaleString('en-IN');
 }
- 
-// ── Normalize text: remove special chars, fix casing, trim spaces ─────────────
-function normalizeText(raw) {
-  return raw
-    // Remove special characters except hyphen and parentheses
-    .replace(/[^a-zA-Z0-9\s\-()&/]/g, '')
-    // Collapse multiple spaces
-    .replace(/\s+/g, ' ')
-    .trim();
-}
- 
-function titleCase(str) {
-  return str
-    .toLowerCase()
-    .replace(/(?:^|\s|\(|-)\w/g, c => c.toUpperCase());
-}
- 
-// Smart fuzzy score — ranks results by relevance like AI autocomplete
-function smartScore(option, query) {
-  const o = option.toLowerCase();
-  const q = query.toLowerCase().trim();
-  if (!q) return 1;
-  if (o === q) return 100;                          // exact match
-  if (o.startsWith(q)) return 90;                   // starts with
-  if (o.includes(' ' + q)) return 80;               // word boundary match
-  if (o.includes(q)) return 70;                     // contains
-  // fuzzy: all query chars appear in order
-  let qi = 0;
-  for (let i = 0; i < o.length && qi < q.length; i++) {
-    if (o[i] === q[qi]) qi++;
-  }
-  if (qi === q.length) return 40 + (q.length / o.length) * 20; // fuzzy match
-  return 0;
-}
- 
-// Deduplicate options — normalize and compare case-insensitively
-function deduplicateOptions(opts) {
-  const seen = new Map();
-  for (const opt of opts) {
-    const key = opt.toLowerCase().replace(/\s+/g, ' ').trim();
-    if (!seen.has(key)) seen.set(key, opt);
-  }
-  return Array.from(seen.values());
-}
- 
-// ── Smart AI-like FS Head Dropdown ────────────────────────────────────────────
-function FSHeadInput({ value, onChange, options, currency, usageMap = {} }) {
-  const [query,     setQuery]     = useState(value || '');
-  const [open,      setOpen]      = useState(false);
-  const [highlight, setHighlight] = useState(0);
-  const ref     = useRef(null);
-  const inputRef = useRef(null);
-  const listRef  = useRef(null);
- 
-  // Sync external value without losing cursor position
+
+// ── Searchable FS Head input with dropdown ────────────────────────────────────
+function FSHeadInput({ value, onChange, options, currency }) {
+  const [query, setQuery]     = useState(value || '');
+  const [open, setOpen]       = useState(false);
+  const [filtered, setFiltered] = useState(options);
+  const ref = useRef(null);
+
+  // Sync external value
+  useEffect(() => { setQuery(value || ''); }, [value]);
+
+  // Filter options as user types
   useEffect(() => {
-    setQuery(value || '');
-  }, [value]);
- 
-  // Deduplicated, cleaned options
-  const cleanOptions = useMemo(() => deduplicateOptions(options), [options]);
- 
-  // Smart ranked results — AI-style: most used + best match first
-  const ranked = useMemo(() => {
-    const q = query.trim();
-    return cleanOptions
-      .map(opt => ({
-        opt,
-        score: smartScore(opt, q) + (usageMap[opt] || 0) * 0.5, // boost frequently used
-      }))
-      .filter(r => r.score > 0)
-      .sort((a, b) => b.score - a.score)
-      .map(r => r.opt);
-  }, [query, cleanOptions, usageMap]);
- 
-  // Show all options sorted by usage when no query
-  const displayed = useMemo(() => {
-    if (!query.trim()) {
-      return [...cleanOptions].sort((a, b) => (usageMap[b] || 0) - (usageMap[a] || 0));
+    if (!query) {
+      setFiltered(options);
+    } else {
+      setFiltered(options.filter(o => o.toLowerCase().includes(query.toLowerCase())));
     }
-    return ranked;
-  }, [query, ranked, cleanOptions, usageMap]);
- 
-  // Check if typed value already exists (case-insensitive)
-  const exactExists = cleanOptions.some(
-    o => o.toLowerCase() === query.toLowerCase().trim()
-  );
- 
-  // Normalize and title-case the query for "Add new" suggestion
-  const normalizedNew = titleCase(normalizeText(query));
-  const canAddNew = query.trim() && !exactExists && normalizedNew.length >= 2;
- 
+  }, [query, options]);
+
   // Close on outside click
   useEffect(() => {
-    const handler = e => {
+    const handler = (e) => {
       if (ref.current && !ref.current.contains(e.target)) setOpen(false);
     };
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
- 
-  // Scroll highlighted item into view
-  useEffect(() => {
-    if (listRef.current) {
-      const item = listRef.current.children[highlight];
-      if (item) item.scrollIntoView({ block: 'nearest' });
-    }
-  }, [highlight]);
- 
+
   function select(opt) {
-    // Always normalize before saving
-    const clean = titleCase(normalizeText(opt));
-    setQuery(clean);
-    onChange(clean);
+    setQuery(opt);
+    onChange(opt);
     setOpen(false);
-    setHighlight(0);
   }
- 
+
   function handleInput(e) {
-    const raw = e.target.value;
-    // Strip special characters as user types — instant cleanup
-    const cleaned = raw.replace(/[^a-zA-Z0-9\s\-()&/]/g, '');
-    setQuery(cleaned);
-    // Don't call onChange yet — only on select/Enter
-    // This prevents the "b then a" flicker from double re-render
+    setQuery(e.target.value);
+    onChange(e.target.value);
     setOpen(true);
-    setHighlight(0);
   }
- 
-  function handleBlur() {
-    // On blur, normalize what's typed and save it
-    setTimeout(() => {
-      if (!open) {
-        const clean = titleCase(normalizeText(query));
-        if (clean !== value) {
-          setQuery(clean);
-          onChange(clean);
-        }
-      }
-    }, 150);
-  }
- 
+
   function handleKeyDown(e) {
-    if (!open) { if (e.key === 'ArrowDown' || e.key === 'Enter') setOpen(true); return; }
-    const total = displayed.length + (canAddNew ? 1 : 0);
-    if (e.key === 'ArrowDown') { e.preventDefault(); setHighlight(h => (h + 1) % total); }
-    if (e.key === 'ArrowUp')   { e.preventDefault(); setHighlight(h => (h - 1 + total) % total); }
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (canAddNew && highlight === 0) { select(normalizedNew); }
-      else {
-        const idx = canAddNew ? highlight - 1 : highlight;
-        if (displayed[idx]) select(displayed[idx]);
-        else if (query.trim()) select(normalizedNew);
-      }
+      if (filtered.length > 0) select(filtered[0]);
+      else if (query) select(query);
     }
-    if (e.key === 'Escape') { setOpen(false); setHighlight(0); }
-    if (e.key === 'Tab')    { setOpen(false); }
+    if (e.key === 'Escape') setOpen(false);
   }
- 
+
   return (
     <div ref={ref} className="relative w-full">
       <input
-        ref={inputRef}
         value={query}
         onChange={handleInput}
         onFocus={() => setOpen(true)}
-        onBlur={handleBlur}
         onKeyDown={handleKeyDown}
-        autoComplete="off"
-        spellCheck={false}
         placeholder="Type or search FS head..."
         className="w-full border border-slate-300 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 focus:border-transparent"
       />
       {open && (
         <div
-          className="absolute z-50 left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-56 overflow-y-auto"
-          onMouseDown={e => e.preventDefault()}
-          ref={listRef}
+          className="absolute z-50 left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-xl shadow-xl max-h-52 overflow-y-auto"
+          onMouseDown={e => e.preventDefault()} // prevent blur before click
         >
-          {/* Add new option — normalized and title-cased */}
-          {canAddNew && (
+          {/* Free text option — always show at top if typed something not in list */}
+          {query && !options.find(o => o.toLowerCase() === query.toLowerCase()) && (
             <div
-              onClick={() => select(normalizedNew)}
-              className={`flex items-center gap-2 px-3 py-2.5 text-sm cursor-pointer border-b border-slate-100 ${highlight === 0 ? 'bg-indigo-50' : 'hover:bg-indigo-50'}`}
+              onClick={() => select(query)}
+              className="w-full text-left px-3 py-2.5 text-sm text-indigo-600 font-semibold hover:bg-indigo-50 border-b border-slate-100 flex items-center gap-2 cursor-pointer"
             >
               <span className="w-5 h-5 rounded-full bg-indigo-100 text-indigo-600 flex items-center justify-center text-xs font-bold flex-shrink-0">+</span>
-              <span className="text-indigo-600 font-semibold">Add</span>
-              <span className="text-indigo-800 font-bold">"{normalizedNew}"</span>
-              {normalizedNew !== query && (
-                <span className="text-xs text-slate-400 ml-1">(auto-formatted)</span>
-              )}
+              Add "{query}" as new FS head
             </div>
           )}
-          {/* No results */}
-          {displayed.length === 0 && !canAddNew && (
-            <div className="px-3 py-4 text-sm text-slate-400 text-center">
-              No matching FS heads — type to add new
-            </div>
+          {filtered.length === 0 && !query && (
+            <div className="px-3 py-3 text-sm text-slate-400 text-center">Type to search FS heads...</div>
           )}
-          {/* Ranked results */}
-          {displayed.map((opt, i) => {
-            const idx    = canAddNew ? i + 1 : i;
-            const isActive = opt.toLowerCase() === (value || '').toLowerCase();
-            const usage   = usageMap[opt] || 0;
-            return (
-              <div
-                key={opt}
-                onClick={() => select(opt)}
-                className={`flex items-center justify-between px-3 py-2 text-sm cursor-pointer transition-colors ${
-                  highlight === idx ? 'bg-indigo-50' :
-                  isActive ? 'bg-indigo-50' : 'hover:bg-slate-50'
-                }`}
-              >
-                <span className={isActive ? 'text-indigo-700 font-semibold' : 'text-slate-700'}>{opt}</span>
-                {usage > 0 && (
-                  <span className="text-xs text-slate-300 flex-shrink-0 ml-2">
-                    used {usage}×
-                  </span>
-                )}
-              </div>
-            );
-          })}
+          {filtered.map(opt => (
+            <div
+              key={opt}
+              onClick={() => select(opt)}
+              className={`w-full text-left px-3 py-2 text-sm hover:bg-indigo-50 transition-colors cursor-pointer ${opt.toLowerCase() === (value||'').toLowerCase() ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-slate-700'}`}
+            >
+              {opt}
+            </div>
+          ))}
         </div>
       )}
     </div>
   );
 }
- 
+
 export default function Mapping() {
   const { engagementId } = useParams();
   const { currentEngagement, currentClient, firm } = useStore();
   const navigate = useNavigate();
- 
+
   const method   = currentEngagement?.method || 'AS';
   // Currency: method is most authoritative (IFRS=AED, AS/IND_AS=INR)
   const currency = (method === 'IFRS' || method === 'IFRS_SME')
@@ -261,7 +126,7 @@ export default function Mapping() {
     ? 'AED'
     : 'INR';
   const currSymbol = currency === 'AED' ? 'AED' : '₹';
- 
+
   const [tbRows,    setTbRows]    = useState([]);
   const [mappings,  setMappings]  = useState({});
   const [master,    setMaster]    = useState([]);
@@ -273,7 +138,7 @@ export default function Mapping() {
   const [filterStatus, setFilterStatus] = useState('all');
   const [unit,        setUnit]        = useState(UNITS[0]);
   const [customFSHeads, setCustomFSHeads] = useState([]);
- 
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -290,9 +155,24 @@ export default function Mapping() {
     } catch { toast.error('Failed to load — make sure TB is uploaded first'); }
     finally { setLoading(false); }
   }, [engagementId, method]);
- 
+
   useEffect(() => { load(); }, [load]);
- 
+
+  async function downloadFSGroupings() {
+    try {
+      const blob = await exportAPI.fsGroupings(method);
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement('a');
+      a.href     = url;
+      a.download = `FS-Groupings-${method}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success('FS Groupings downloaded');
+    } catch (err) {
+      toast.error('Download failed — ' + (err?.message || 'unknown error'));
+    }
+  }
+
   async function autoMap() {
     try {
       const res = await mappingAPI.autoMap(engagementId);
@@ -300,7 +180,7 @@ export default function Mapping() {
       load();
     } catch (err) { toast.error(err?.error || 'Auto-map failed'); }
   }
- 
+
   async function saveMapping(subGrouping, data) {
     try {
       const payload = { subGrouping, ...data };
@@ -313,12 +193,12 @@ export default function Mapping() {
       toast.error('Save failed');
     }
   }
- 
+
   function generateNoteGroupId(groupName) {
     // Auto-generate a noteGroupId from the group name
     return 'NG-' + groupName.toUpperCase().replace(/[^A-Z0-9]/g, '-').replace(/-+/g, '-').slice(0, 20);
   }
- 
+
   async function quickChangeGroup(subGrouping, groupName) {
     if (!groupName || groupName === '-- Select FS Head --') return;
     const masterRow = master.find(m => m.groupName === groupName);
@@ -331,7 +211,7 @@ export default function Mapping() {
     };
     await saveMapping(subGrouping, data);
   }
- 
+
   async function generateFS() {
     setGenerating(true);
     try {
@@ -342,7 +222,7 @@ export default function Mapping() {
     } catch (err) { toast.error(err?.error || 'Generation failed'); }
     finally { setGenerating(false); }
   }
- 
+
   // Aggregate TB rows by subGrouping
   const subGroupTotals = {};
   tbRows.forEach(r => {
@@ -351,34 +231,17 @@ export default function Mapping() {
     subGroupTotals[sg].rows.push(r);
     subGroupTotals[sg].total += Number(r.finalNet || 0);
   });
- 
+
   const allSubGroups = Object.values(subGroupTotals);
- 
+
   // Combine master grouping names + any custom FS heads already used in this engagement
   const masterGroupNames = master.map(m => m.groupName);
   const savedGroupNames  = Object.values(mappings)
     .filter(m => m.groupName)
     .map(m => m.groupName);
-  // Include custom FS heads added this session
-  const rawGroups = [...new Set([...masterGroupNames, ...savedGroupNames, ...customFSHeads])];
-  // Deduplicate — normalize case and spacing
-  const seenGroups = new Map();
-  for (const g of rawGroups) {
-    if (!g) continue;
-    const key = g.toLowerCase().replace(/\s+/g, ' ').trim();
-    if (!seenGroups.has(key)) seenGroups.set(key, g);
-  }
-  const uniqueGroups = Array.from(seenGroups.values()).sort();
- 
-  // Usage map — count how many TB rows use each FS head (AI learning)
-  const usageMap = useMemo(() => {
-    const map = {};
-    Object.values(mappings).forEach(m => {
-      if (m.groupName) map[m.groupName] = (map[m.groupName] || 0) + 1;
-    });
-    return map;
-  }, [mappings]);
- 
+  // Include custom FS heads added this session so they appear in dropdown immediately
+  const uniqueGroups = [...new Set([...masterGroupNames, ...savedGroupNames, ...customFSHeads])].sort();
+
   const filtered = allSubGroups.filter(sg => {
     const isMapped = !!mappings[sg.subGrouping]?.groupName;
     if (filterStatus === 'mapped'   && !isMapped) return false;
@@ -390,12 +253,12 @@ export default function Mapping() {
     }
     return true;
   });
- 
+
   const totalMapped   = allSubGroups.filter(sg => !!mappings[sg.subGrouping]?.groupName).length;
   const totalUnmapped = allSubGroups.length - totalMapped;
- 
+
   if (loading) return <div className="p-8 text-slate-400">Loading TB data...</div>;
- 
+
   return (
     <div className="p-6">
       {/* Header */}
@@ -411,6 +274,10 @@ export default function Mapping() {
           </p>
         </div>
         <div className="flex gap-2">
+          <button onClick={downloadFSGroupings}
+            className="px-3 py-2 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50 flex items-center gap-1.5" title="Download master FS Groupings list as CSV">
+            ⬇ FS Groupings
+          </button>
           <button onClick={autoMap} className="px-3 py-2 border border-slate-300 text-slate-700 text-sm rounded-lg hover:bg-slate-50">
             ↻ Auto-Map
           </button>
@@ -420,13 +287,13 @@ export default function Mapping() {
           </button>
         </div>
       </div>
- 
+
       {/* Filters */}
       <div className="flex gap-3 mb-4 flex-wrap items-center bg-slate-50 border border-slate-200 rounded-xl p-3">
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search sub-grouping or FS head..."
           className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 w-64" />
- 
+
         <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
           {[['all','All'],['mapped','Mapped'],['unmapped','Unmapped']].map(([val,label]) => (
             <button key={val} onClick={() => setFilterStatus(val)}
@@ -435,7 +302,7 @@ export default function Mapping() {
             </button>
           ))}
         </div>
- 
+
         <div className="flex items-center gap-2 ml-auto">
           <span className="text-xs text-slate-500">Amounts in:</span>
           <select value={unit.value} onChange={e => setUnit(UNITS.find(u => u.value === Number(e.target.value)))}
@@ -448,7 +315,7 @@ export default function Mapping() {
           </select>
         </div>
       </div>
- 
+
       {/* Table */}
       {filtered.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
@@ -478,18 +345,18 @@ export default function Mapping() {
                 const mapping   = mappings[sg.subGrouping];
                 const isMapped  = !!mapping?.groupName;
                 const isEditing = editingRow === sg.subGrouping;
- 
+
                 return (
                   <React.Fragment key={sg.subGrouping}>
                     <tr className={`hover:bg-slate-50 ${!isMapped ? 'bg-red-50' : ''}`}>
                       <td className="px-4 py-2.5 text-slate-400 text-xs">{idx+1}</td>
- 
+
                       <td className="px-4 py-2.5">
                         <div className={`font-medium ${isMapped ? 'text-slate-800' : 'text-red-700'}`}>{sg.subGrouping}</div>
                         <div className="text-xs text-slate-400 mt-0.5">{sg.rows.length} ledger row{sg.rows.length > 1 ? 's' : ''}</div>
                         {!isMapped && <div className="text-xs text-red-500 mt-0.5">⚠ Not mapped</div>}
                       </td>
- 
+
                       {/* FS Head — always searchable typeahead */}
                       <td className="px-4 py-2.5">
                         {isEditing ? (
@@ -508,7 +375,7 @@ export default function Mapping() {
                           />
                         )}
                       </td>
- 
+
                       {/* Sub Group Name */}
                       <td className="px-4 py-2.5">
                         {isEditing ? (
@@ -519,7 +386,7 @@ export default function Mapping() {
                           <span className="text-slate-500 text-xs">{mapping?.subGroupName || '—'}</span>
                         )}
                       </td>
- 
+
                       {/* Note Group */}
                       <td className="px-4 py-2.5">
                         {isEditing ? (
@@ -530,12 +397,12 @@ export default function Mapping() {
                           <span className="text-slate-500 text-xs">{mapping?.noteGroupId || '—'}</span>
                         )}
                       </td>
- 
+
                       {/* Amount */}
                       <td className="px-4 py-2.5 text-right font-mono text-slate-800">
                         {fmtAmt(sg.total, unit.value)}
                       </td>
- 
+
                       {/* Source */}
                       <td className="px-4 py-2.5 text-center">
                         {isMapped && (
@@ -544,7 +411,7 @@ export default function Mapping() {
                           </span>
                         )}
                       </td>
- 
+
                       {/* Actions */}
                       <td className="px-4 py-2.5 text-center">
                         {isEditing ? (
@@ -562,7 +429,7 @@ export default function Mapping() {
                         )}
                       </td>
                     </tr>
- 
+
                     {/* Expanded ledger rows when editing */}
                     {isEditing && sg.rows.map((row, ri) => (
                       <tr key={ri} className="bg-indigo-50 border-b border-indigo-100">

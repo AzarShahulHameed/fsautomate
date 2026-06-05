@@ -168,11 +168,17 @@ async function generateFS(engagementId, firmId) {
     mappings.map(m => [m.subGrouping.trim().toLowerCase(), m])
   );
 
-  // ── Aggregate TB rows by FS Head ─────────────────────────────────────────
-  const aggregates  = new Map(); // groupName → { totalRawNet, al, sheet, noteGroupId, ... }
+
+// ════════════════════════════════════════════════════════════════════════════
+// AGGREGATE TB ROWS → FS LINES
+// Extracted as a pure function so it can be called for both CY and PY TB.
+// Returns a Map of groupName → aggregate object ready for persistence.
+// ════════════════════════════════════════════════════════════════════════════
+function aggregateTBRows(tbRows, mappingIndex, method) {
+  const aggregates  = new Map();
   const unmappedSGs = new Set();
 
-  for (const row of latest.rows) {
+  for (const row of tbRows) {
     const key     = row.subGrouping.trim().toLowerCase();
     const mapping = mappingIndex.get(key);
 
@@ -200,25 +206,14 @@ async function generateFS(engagementId, firmId) {
     agg.rows.push(row);
   }
 
-  // ── Apply display sign flip ───────────────────────────────────────────────
+  // Apply display sign flip
   for (const agg of aggregates.values()) {
     agg.totalFinalNet = displaySign(agg.totalRawNet, agg.assetLiability);
   }
 
-  // ── Close P&L to Equity (mandatory for BS to balance) ────────────────────
-  // TB has opening balances only. Net P&L must flow to equity.
-  // Income stored as negative (credit), Expenses as positive (debit)
-  // Net P&L raw = sum of all PL raw values (negative = profit, positive = loss)
-  const plRawSum = [...aggregates.values()]
-    .filter(a => a.sheet === 'PL')
-    .reduce((s, a) => s + a.totalRawNet, 0);
-  // OCI raw sum (negative = income/gain in OCI)
-  const ociRawSum = [...aggregates.values()]
-    .filter(a => a.sheet === 'OCI')
-    .reduce((s, a) => s + a.totalRawNet, 0);
-
-  // PAT for display = flip sign of raw PL sum
-  // (negative raw PL = profit = positive display)
+  // Close P&L into Equity
+  const plRawSum  = [...aggregates.values()].filter(a => a.sheet === 'PL').reduce((s,a) => s + a.totalRawNet, 0);
+  const ociRawSum = [...aggregates.values()].filter(a => a.sheet === 'OCI').reduce((s,a) => s + a.totalRawNet, 0);
   const patDisplay = -plRawSum;
   const ociDisplay = -ociRawSum;
 
@@ -233,7 +228,6 @@ async function generateFS(engagementId, firmId) {
       rows:           [],
     });
   }
-
   if (Math.abs(ociDisplay) > 0.01) {
     aggregates.set('__OCI_EQUITY__', {
       groupName:      'Other Comprehensive Income / (Loss)',
@@ -246,67 +240,105 @@ async function generateFS(engagementId, firmId) {
     });
   }
 
-  // ── Rounding Difference Absorber ──────────────────────────────────────────
-  // After P&L close, recalculate BS totals
-  // Any remaining difference (due to floating point or TB rounding) is absorbed
-  // into a "Rounding Difference" equity line — standard accounting practice
-  const bsCheck = {
-    assets: [...aggregates.values()].filter(a=>a.sheet==='BS'&&a.assetLiability==='Assets').reduce((s,a)=>s+a.totalFinalNet,0),
-    equity: [...aggregates.values()].filter(a=>a.sheet==='BS'&&a.assetLiability==='Equity').reduce((s,a)=>s+a.totalFinalNet,0),
-    liab:   [...aggregates.values()].filter(a=>a.sheet==='BS'&&a.assetLiability==='Liabilities').reduce((s,a)=>s+a.totalFinalNet,0),
+  return { aggregates, unmappedSGs };
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// GENERATE FS
+// Runs aggregation for Current Year TB and (if present) Prior Year TB.
+// Both sets of FSLines are stored with isPriorYear flag.
+// ════════════════════════════════════════════════════════════════════════════
+async function generateFS(engagementId, firmId) {
+  const engagement = await prisma.engagement.findFirst({
+    where: { id: engagementId, client: { firmId } },
+    include: { client: { include: { firm: true } } },
+  });
+  if (!engagement) throw Object.assign(new Error('Engagement not found'), { status: 404 });
+
+  // ── Fetch Current Year TB (latest non-prior version) ──────────────────────
+  const latestCY = await prisma.tBVersion.findFirst({
+    where: { engagementId, isPriorYear: false },
+    orderBy: { versionNumber: 'desc' },
+    include: { rows: true },
+  });
+  if (!latestCY) throw Object.assign(new Error('No TB uploaded yet'), { status: 422 });
+
+  // ── Fetch Prior Year TB (isPriorYear = true, versionNumber = 0) ───────────
+  const latestPY = await prisma.tBVersion.findFirst({
+    where: { engagementId, isPriorYear: true },
+    orderBy: { versionNumber: 'desc' },
+    include: { rows: true },
+  });
+
+  const mappings = await prisma.mapping.findMany({ where: { engagementId } });
+  if (!mappings.length) throw Object.assign(new Error('No mappings found. Map TB items first.'), { status: 422 });
+
+  const method   = engagement.method;
+  const currency = engagement.client?.firm?.currency ||
+    (['IFRS','IFRS_SME'].includes(method) ? 'AED' : 'INR');
+  engagement.currency = currency;
+
+  const mappingIndex = new Map(mappings.map(m => [m.subGrouping.trim().toLowerCase(), m]));
+
+  // ── Aggregate CY ──────────────────────────────────────────────────────────
+  const { aggregates: cyAggs, unmappedSGs } = aggregateTBRows(latestCY.rows, mappingIndex, method);
+
+  // Rounding absorber for CY
+  const roundingThreshold = currency === 'AED' ? 10 : 100;
+  const cyBSCheck = {
+    assets: [...cyAggs.values()].filter(a=>a.sheet==='BS'&&a.assetLiability==='Assets').reduce((s,a)=>s+a.totalFinalNet,0),
+    equity: [...cyAggs.values()].filter(a=>a.sheet==='BS'&&a.assetLiability==='Equity').reduce((s,a)=>s+a.totalFinalNet,0),
+    liab:   [...cyAggs.values()].filter(a=>a.sheet==='BS'&&a.assetLiability==='Liabilities').reduce((s,a)=>s+a.totalFinalNet,0),
   };
-  const remainingDiff = bsCheck.assets - bsCheck.equity - bsCheck.liab;
-
-  // Absorb rounding differences up to configured threshold
-  const roundingThreshold = engagement.currency === 'AED' ? 10 : 100; // AED 10, INR 100
-
-  if (Math.abs(remainingDiff) > 0.001 && Math.abs(remainingDiff) <= roundingThreshold) {
-    aggregates.set('__ROUNDING__', {
-      groupName:      'Rounding Difference',
-      totalRawNet:    -remainingDiff,
-      totalFinalNet:  remainingDiff,
-      noteGroupId:    null,
-      sheet:          'BS',
-      assetLiability: 'Equity',
-      rows:           [],
+  const cyDiff = cyBSCheck.assets - cyBSCheck.equity - cyBSCheck.liab;
+  if (Math.abs(cyDiff) > 0.001 && Math.abs(cyDiff) <= roundingThreshold) {
+    cyAggs.set('__ROUNDING__', {
+      groupName: 'Rounding Difference', totalRawNet: -cyDiff, totalFinalNet: cyDiff,
+      noteGroupId: null, sheet: 'BS', assetLiability: 'Equity', rows: [],
     });
   }
 
-  // ── BS Validation ─────────────────────────────────────────────────────────
-  // Since TB is balanced (ΣfinalNet = 0), and we flip signs for display,
-  // BS should balance: Assets = Equity + Liabilities
-  const bsAggs    = [...aggregates.values()].filter(a => a.sheet === 'BS');
-  const assets    = bsAggs.filter(a => a.assetLiability === 'Assets').reduce((s,a) => s + a.totalFinalNet, 0);
-  const equity    = bsAggs.filter(a => a.assetLiability === 'Equity').reduce((s,a) => s + a.totalFinalNet, 0);
-  const liab      = bsAggs.filter(a => a.assetLiability === 'Liabilities').reduce((s,a) => s + a.totalFinalNet, 0);
-  const bsDiff    = assets - equity - liab;
-  const errors    = Math.abs(bsDiff) > 0.01
-    ? [{ type: 'BS_MISMATCH', message: `Balance Sheet difference: ${bsDiff.toFixed(2)}. Check that all liability/equity items are mapped correctly.`, detail: { assets, equity, liab, difference: bsDiff } }]
+  const bsAggs = [...cyAggs.values()].filter(a => a.sheet === 'BS');
+  const bsDiff = bsAggs.filter(a=>a.assetLiability==='Assets').reduce((s,a)=>s+a.totalFinalNet,0)
+               - bsAggs.filter(a=>a.assetLiability==='Equity').reduce((s,a)=>s+a.totalFinalNet,0)
+               - bsAggs.filter(a=>a.assetLiability==='Liabilities').reduce((s,a)=>s+a.totalFinalNet,0);
+  const errors = Math.abs(bsDiff) > 0.01
+    ? [{ type: 'BS_MISMATCH', message: `Balance Sheet difference: ${bsDiff.toFixed(2)}.`, detail: { bsDiff } }]
     : [];
 
-  // ── Assign note numbers in correct FS display order ─────────────────────
-  // Works universally for any TB — order derived from FS structure not TB order
+  // ── Aggregate PY (if uploaded) ────────────────────────────────────────────
+  let pyAggs = new Map();
+  let hasPY  = false;
+  if (latestPY && latestPY.rows.length > 0) {
+    const { aggregates } = aggregateTBRows(latestPY.rows, mappingIndex, method);
+    // PY rounding absorber
+    const pyBSCheck = {
+      assets: [...aggregates.values()].filter(a=>a.sheet==='BS'&&a.assetLiability==='Assets').reduce((s,a)=>s+a.totalFinalNet,0),
+      equity: [...aggregates.values()].filter(a=>a.sheet==='BS'&&a.assetLiability==='Equity').reduce((s,a)=>s+a.totalFinalNet,0),
+      liab:   [...aggregates.values()].filter(a=>a.sheet==='BS'&&a.assetLiability==='Liabilities').reduce((s,a)=>s+a.totalFinalNet,0),
+    };
+    const pyDiff = pyBSCheck.assets - pyBSCheck.equity - pyBSCheck.liab;
+    if (Math.abs(pyDiff) > 0.001 && Math.abs(pyDiff) <= roundingThreshold) {
+      aggregates.set('__ROUNDING__', {
+        groupName: 'Rounding Difference', totalRawNet: -pyDiff, totalFinalNet: pyDiff,
+        noteGroupId: null, sheet: 'BS', assetLiability: 'Equity', rows: [],
+      });
+    }
+    pyAggs = aggregates;
+    hasPY  = true;
+  }
 
-  const SHEET_ORDER = { BS: 0, PL: 1, OCI: 2 };
+  // ── Sort CY aggregates (determines display order) ─────────────────────────
+  const SHEET_ORDER   = { BS: 0, PL: 1, OCI: 2 };
+  const isIFRS        = ['IFRS','IFRS_SME'].includes(method);
+  const BS_AL_ORDER   = isIFRS ? { Assets: 0, Equity: 1, Liabilities: 2 } : { Equity: 0, Liabilities: 1, Assets: 2 };
+  const PL_AL_ORDER   = { Income: 0, Expenses: 1 };
 
-  // Within BS: order by assetLiability based on method
-  // IFRS: Assets → Equity → Liabilities
-  // AS/IndAS: Equity → Liabilities → Assets  (Schedule III)
-  const isIFRS   = ['IFRS','IFRS_SME'].includes(method);
-  const BS_AL_ORDER = isIFRS
-    ? { Assets: 0, Equity: 1, Liabilities: 2 }
-    : { Equity: 0, Liabilities: 1, Assets: 2 };
-
-  // Within PL: Revenue → COGS → Gross Profit → Other Income → Opex → Finance → Tax
-  const PL_AL_ORDER = { Income: 0, Expenses: 1 };
-
-  // Within Assets/Liabilities: Non-Current before Current (keyword detection)
-  function isNonCurrent(groupName) {
-    const n = (groupName || '').toLowerCase();
-    if (n.includes('short term') || n.includes('short-term')) return false;
-    if (n.includes('long term')  || n.includes('long-term'))  return true;
-    // Non-current asset keywords
-    const NCA = ['property, plant','property plant','fixed asset','tangible asset','ppe',
+  function isNonCurrent(gn) {
+    const n = (gn||'').toLowerCase();
+    if (n.includes('short term')||n.includes('short-term')) return false;
+    if (n.includes('long term')||n.includes('long-term'))   return true;
+    const KW = ['property, plant','property plant','fixed asset','tangible asset','ppe',
       'land','building','furniture','fixture','vehicle','motor','machinery','equipment','computer',
       'right-of-use','right of use','rou asset','intangible','goodwill','software','trademark','patent',
       'capital work in progress','capital wip','cwip','construction in progress','asset under construction',
@@ -314,231 +346,200 @@ async function generateFS(engagementId, firmId) {
       'investment in joint venture','investment in equity','quoted investment','unquoted investment',
       'deferred tax asset','security deposit','earnest money deposit',
       'capital advance','other non-current','non-current asset'];
-    if (NCA.some(k => n.includes(k))) return true;
-    // investment alone (not "current investment") = non-current
-    if (n.includes('investment') && !n.includes('current invest') && !n.includes('short')) return true;
+    if (KW.some(k=>n.includes(k))) return true;
+    if (n.includes('investment')&&!n.includes('current invest')&&!n.includes('short')) return true;
     return false;
   }
 
-  function isCurrentAsset(groupName) {
-    const n = (groupName || '').toLowerCase();
-    if (n.includes('short term') || n.includes('short-term')) return true;
-    const CA = ['inventor','stock','raw material','finished good','work in progress',
-      'trade receivable','account receivable','sundry debtor','debtor','bill receivable',
-      'cash in hand','cash in bank','cash at bank','cash and bank','cash and cash equivalent',
-      'bank balance','current investment','short term investment',
-      'loans and advance','loan and advance','advance to','advance paid','prepaid','prepayment',
-      'other current','accrued income','income receivable','interest receivable',
-      'vat receivable','gst receivable','input tax','advance tax','tds receivable',
-      'provision for bad debt','due from'];
-    return CA.some(k => n.includes(k));
-  }
-
-  function isNonCurrentLiab(groupName) {
-    const n = (groupName || '').toLowerCase();
-    if (n.includes('short term') || n.includes('short-term')) return false;
-    if (n.includes('long term')  || n.includes('long-term'))  return true;
-    const NCL = ['non-current liab','deferred tax liab','lease liabilit','finance lease',
+  function isNonCurrentLiab(gn) {
+    const n = (gn||'').toLowerCase();
+    if (n.includes('short term')||n.includes('short-term')) return false;
+    if (n.includes('long term')||n.includes('long-term'))   return true;
+    const KW = ['non-current liab','deferred tax liab','lease liabilit','finance lease',
       'provision for gratuity','gratuity liabilit','pension','post employment',
       'defined benefit','employee benefit liabilit','compensated absence',
       'bond','debenture','term loan','ecb','external commercial',
       'other non-current liabilit','security deposit received'];
-    return NCL.some(k => n.includes(k));
+    return KW.some(k=>n.includes(k));
   }
 
-  // P&L sub-ordering: Revenue=0, COS=1, OtherIncome=2, Selling=3, Admin=4, Depr=5, Finance=6, Tax=7
-  function plSubOrder(groupName) {
-    const n = (groupName || '').toLowerCase();
-    if (n.includes('revenue') || n.includes('turnover') || n.includes('sales') || n.includes('income from operations')) return 0;
-    if (n.includes('cost of') || n.includes('cost of sale') || n.includes('cogs') || n.includes('cost of revenue') || n.includes('cost of good') || n.includes('cost of material')) return 1;
-    if (n.includes('other income') || n.includes('other revenue') || n.includes('miscellaneous income')) return 2;
-    if (n.includes('selling') || n.includes('distribution') || n.includes('marketing')) return 3;
-    if (n.includes('admin') || n.includes('general') || n.includes('employee') || n.includes('staff') || n.includes('salary') || n.includes('wages')) return 4;
-    if (n.includes('depreciation') || n.includes('amortis') || n.includes('amortiz')) return 5;
-    if (n.includes('finance cost') || n.includes('interest') || n.includes('bank charge')) return 6;
-    if (n.includes('tax') || n.includes('income tax')) return 7;
-    return 3; // default: operating expense bucket
+  function plSubOrder(gn) {
+    const n = (gn||'').toLowerCase();
+    if (n.includes('revenue')||n.includes('turnover')||n.includes('sales')||n.includes('income from operations')) return 0;
+    if (n.includes('cost of')||n.includes('cogs')||n.includes('material consumed')) return 1;
+    if (n.includes('other income')||n.includes('miscellaneous income')) return 2;
+    if (n.includes('selling')||n.includes('distribution')||n.includes('marketing')) return 3;
+    if (n.includes('admin')||n.includes('general')||n.includes('employee')||n.includes('salary')||n.includes('wages')) return 4;
+    if (n.includes('depreciation')||n.includes('amortis')||n.includes('amortiz')) return 5;
+    if (n.includes('finance cost')||n.includes('interest')||n.includes('bank charge')) return 6;
+    if (n.includes('tax')||n.includes('income tax')) return 7;
+    return 3;
   }
 
-  const sortedAggs = [...aggregates.values()].sort((a, b) => {
-    // 0. If user explicitly set displayOrder on mapping — use it first (highest priority)
-    if (a.displayOrder != null && b.displayOrder != null) {
-      return a.displayOrder - b.displayOrder;
-    }
-    // If only one has it, that one comes first
+  const sortedCYAggs = [...cyAggs.values()].sort((a, b) => {
+    if (a.displayOrder != null && b.displayOrder != null) return a.displayOrder - b.displayOrder;
     if (a.displayOrder != null) return -1;
     if (b.displayOrder != null) return 1;
-
-    // 1. Sheet order
-    const sd = (SHEET_ORDER[a.sheet] ?? 9) - (SHEET_ORDER[b.sheet] ?? 9);
+    const sd = (SHEET_ORDER[a.sheet]??9) - (SHEET_ORDER[b.sheet]??9);
     if (sd !== 0) return sd;
-
-    // 2. Within BS: by AL group (method-specific)
     if (a.sheet === 'BS') {
-      const ad = (BS_AL_ORDER[a.assetLiability] ?? 9) - (BS_AL_ORDER[b.assetLiability] ?? 9);
+      const ad = (BS_AL_ORDER[a.assetLiability]??9) - (BS_AL_ORDER[b.assetLiability]??9);
       if (ad !== 0) return ad;
-
-      // 3. Within Assets: Non-Current before Current
-      if (a.assetLiability === 'Assets' && b.assetLiability === 'Assets') {
-        const aNC = isNonCurrent(a.groupName) ? 0 : 1;
-        const bNC = isNonCurrent(b.groupName) ? 0 : 1;
-        if (aNC !== bNC) return aNC - bNC;
+      if (a.assetLiability === 'Assets') {
+        const r = (isNonCurrent(a.groupName)?0:1) - (isNonCurrent(b.groupName)?0:1);
+        if (r !== 0) return r;
       }
-
-      // 3. Within Liabilities: Non-Current before Current
-      if (a.assetLiability === 'Liabilities' && b.assetLiability === 'Liabilities') {
-        const aNC = isNonCurrentLiab(a.groupName) ? 0 : 1;
-        const bNC = isNonCurrentLiab(b.groupName) ? 0 : 1;
-        if (aNC !== bNC) return aNC - bNC;
+      if (a.assetLiability === 'Liabilities') {
+        const r = (isNonCurrentLiab(a.groupName)?0:1) - (isNonCurrentLiab(b.groupName)?0:1);
+        if (r !== 0) return r;
       }
     }
-
-    // 4. Within PL: Income before Expenses
     if (a.sheet === 'PL') {
-      const pd = (PL_AL_ORDER[a.assetLiability] ?? 9) - (PL_AL_ORDER[b.assetLiability] ?? 9);
+      const pd = (PL_AL_ORDER[a.assetLiability]??9) - (PL_AL_ORDER[b.assetLiability]??9);
       if (pd !== 0) return pd;
-      // Within same AL: sub-order by P&L structure
       return plSubOrder(a.groupName) - plSubOrder(b.groupName);
     }
-
     return 0;
   });
 
-  // Only assign note numbers to aggregates with non-zero values
-  // This prevents gaps like: Note 3=PPE, Note 4=(zero item, hidden), Note 5=Trade Rec
-  const uniqueNoteGroupIds = [...new Set(
-    sortedAggs
-      .filter(a => a.noteGroupId && Math.abs(Number(a.totalFinalNet || 0)) >= 0.005)
-      .map(a => a.noteGroupId)
-  )];
-  const noteNumberMap = assignNoteNumbers(method, uniqueNoteGroupIds);
+  const uniqueNoteGroupIds = [...new Set(sortedCYAggs.map(a => a.noteGroupId).filter(Boolean))];
+  const noteNumberMap      = assignNoteNumbers(method, uniqueNoteGroupIds);
 
-  // ── Persist to DB using raw SQL — no transaction timeout ─────────────────
-  const { v4: uuid } = require('uuid');
+  // ── Persist to DB ─────────────────────────────────────────────────────────
+  const result = await prisma.$transaction(async (tx) => {
+    await tx.noteDetail.deleteMany({ where: { engagementId } });
+    await tx.fSLine.deleteMany({ where: { engagementId } });
+    await tx.noteGroup.deleteMany({ where: { engagementId } });
 
-  // Step 1: Delete existing data for this engagement
-  await prisma.$executeRawUnsafe(`DELETE FROM "NoteDetail" WHERE "engagementId"=$1`, engagementId);
-  await prisma.$executeRawUnsafe(`DELETE FROM "FSLine"     WHERE "engagementId"=$1`, engagementId);
-  await prisma.$executeRawUnsafe(`DELETE FROM "NoteGroup"  WHERE "engagementId"=$1`, engagementId);
+    let autoNum = 100;
+    const createdNGs = new Map();
 
-  // Step 2: Bulk insert NoteGroups — single query instead of N queries
-  let autoNum = 100;
-  const createdNGs = new Map();
-  const ngRows = [];
+    for (const agg of sortedCYAggs) {
+      if (!agg.noteGroupId || createdNGs.has(agg.noteGroupId)) continue;
+      const noteNumber = noteNumberMap.get(agg.noteGroupId) || autoNum++;
+      const ng = await tx.noteGroup.create({
+        data: { engagementId, noteGroupId: agg.noteGroupId, noteNumber, title: agg.groupName, isMandatory: false },
+      });
+      createdNGs.set(agg.noteGroupId, ng);
+    }
 
-  for (const [, agg] of aggregates) {
-    if (!agg.noteGroupId || createdNGs.has(agg.noteGroupId)) continue;
-    const noteNumber = noteNumberMap.get(agg.noteGroupId) || autoNum++;
-    const ngId = uuid();
-    createdNGs.set(agg.noteGroupId, { id: ngId, noteGroupId: agg.noteGroupId, noteNumber, title: agg.groupName });
-    ngRows.push({ id: ngId, noteGroupId: agg.noteGroupId, noteNumber, title: agg.groupName });
-  }
+    // ── Write CY FSLines ───────────────────────────────────────────────────
+    let order       = 0;
+    const fsLineData = [];
 
-  if (ngRows.length > 0) {
-    // Build single bulk INSERT for all NoteGroups
-    const ngPlaceholders = ngRows.map((_, i) => {
-      const base = i * 5;
-      return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},false,NOW())`;
-    }).join(',');
-    const ngValues = ngRows.flatMap(r => [r.id, engagementId, r.noteGroupId, r.noteNumber, r.title]);
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO "NoteGroup" (id,"engagementId","noteGroupId","noteNumber",title,"isMandatory","createdAt")
-       VALUES ${ngPlaceholders} ON CONFLICT DO NOTHING`,
-      ...ngValues
-    );
-  }
-
-  // Step 3: Bulk insert FSLines — single query
-  let order = 0;
-  const fsLineData = [];
-  const fsRows = [];
-
-  for (const [, agg] of aggregates) {
-    const lineId = uuid();
-    const ngData = agg.noteGroupId ? createdNGs.get(agg.noteGroupId) : null;
-    fsRows.push({ id: lineId, agg, order: ++order });
-    fsLineData.push({
-      id: lineId, engagementId, tbVersionId: latest.id,
-      sheet: agg.sheet, groupName: agg.groupName,
-      totalFinalNet: agg.totalFinalNet, noteGroupId: agg.noteGroupId || null,
-      displayOrder: order, assetLiability: agg.assetLiability,
-      noteGroup: ngData || null,
-    });
-  }
-
-  if (fsRows.length > 0) {
-    const fsPlaceholders = fsRows.map((_, i) => {
-      const base = i * 9;
-      return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7},$${base+8},$${base+9}::"AssetLiability",NOW())`;
-    }).join(',');
-    const fsValues = fsRows.flatMap(r => [
-      r.id, engagementId, latest.id,
-      r.agg.sheet, r.agg.groupName, r.agg.totalFinalNet,
-      r.agg.noteGroupId || null, r.order, r.agg.assetLiability,
-    ]);
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO "FSLine" (id,"engagementId","tbVersionId",sheet,"groupName","totalFinalNet","noteGroupId","displayOrder","assetLiability","generatedAt")
-       VALUES ${fsPlaceholders}`,
-      ...fsValues
-    );
-  }
-
-  const result = { sheets: groupBySheet(fsLineData), errors, unmappedCount: unmappedSGs.size };
-
-  // Step 4: Bulk insert NoteDetails — chunk into batches of 100
-  try {
-    const ndRows = [];
-    for (const [, agg] of aggregates) {
-      if (!agg.noteGroupId) continue;
-      for (const tbr of agg.rows) {
-        ndRows.push({
-          id:            uuid(),
+    for (const agg of sortedCYAggs) {
+      const line = await tx.fSLine.create({
+        data: {
           engagementId,
-          noteGroupId:   agg.noteGroupId,
-          subGroupName:  tbr.subGrouping    || '',
-          accountNumber: tbr.accountNumber  || '',
-          accountName:   tbr.accountName    || '',
-          finalNet:      displaySign(Number(tbr.finalNet || 0), agg.assetLiability),
+          tbVersionId:    latestCY.id,
+          sheet:          agg.sheet,
+          groupName:      agg.groupName,
+          totalFinalNet:  agg.totalFinalNet,
+          noteGroupId:    agg.noteGroupId || null,
+          displayOrder:   ++order,
+          assetLiability: agg.assetLiability,
+          isPriorYear:    false,
+        },
+      });
+      fsLineData.push({ ...line, noteGroup: agg.noteGroupId ? (createdNGs.get(agg.noteGroupId) || null) : null });
+    }
+
+    // ── Write PY FSLines (same groupNames as CY order, amount from PY aggregates) ──
+    if (hasPY) {
+      let pyOrder = 0;
+      for (const cyAgg of sortedCYAggs) {
+        // Match PY aggregate by groupName
+        const pyAgg = pyAggs.get(cyAgg.groupName);
+        await tx.fSLine.create({
+          data: {
+            engagementId,
+            tbVersionId:    latestPY.id,
+            sheet:          cyAgg.sheet,
+            groupName:      cyAgg.groupName,
+            // If PY has this group — use its amount; if not — store 0 (shows as nil in statement)
+            totalFinalNet:  pyAgg ? pyAgg.totalFinalNet : 0,
+            noteGroupId:    cyAgg.noteGroupId || null,
+            displayOrder:   ++pyOrder,
+            assetLiability: cyAgg.assetLiability,
+            isPriorYear:    true,
+          },
+        });
+      }
+
+      // Also write any PY groups that don't exist in CY (new items in prior year)
+      for (const [gn, pyAgg] of pyAggs) {
+        if (cyAggs.has(gn)) continue; // already written above
+        await tx.fSLine.create({
+          data: {
+            engagementId,
+            tbVersionId:    latestPY.id,
+            sheet:          pyAgg.sheet,
+            groupName:      pyAgg.groupName,
+            totalFinalNet:  pyAgg.totalFinalNet,
+            noteGroupId:    pyAgg.noteGroupId || null,
+            displayOrder:   ++order + 1000, // after all CY items
+            assetLiability: pyAgg.assetLiability,
+            isPriorYear:    true,
+          },
         });
       }
     }
 
-    // Insert in chunks of 100 to avoid parameter limits
-    const CHUNK = 100;
-    for (let i = 0; i < ndRows.length; i += CHUNK) {
-      const chunk = ndRows.slice(i, i + CHUNK);
-      const placeholders = chunk.map((_, j) => {
-        const base = j * 8;
-        return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7},$${base+8},NOW())`;
-      }).join(',');
-      const values = chunk.flatMap(r => [
-        r.id, r.engagementId, r.noteGroupId,
-        r.subGroupName, r.accountNumber, r.accountName,
-        r.finalNet, 0,
-      ]);
-      await prisma.$executeRawUnsafe(
-        `INSERT INTO "NoteDetail" (id,"engagementId","noteGroupId","subGroupName","accountNumber","accountName","finalNet","displayOrder","createdAt")
-         VALUES ${placeholders}`,
-        ...values
-      );
+    return { sheets: groupBySheet(fsLineData), errors, unmappedCount: unmappedSGs.size, hasPY };
+  });
+
+  // NoteDetails (CY only)
+  try {
+    await prisma.noteDetail.deleteMany({ where: { engagementId } });
+    for (const agg of sortedCYAggs) {
+      if (!agg.noteGroupId) continue;
+      const ngExists = await prisma.noteGroup.findFirst({ where: { engagementId, noteGroupId: agg.noteGroupId } });
+      if (!ngExists) continue;
+      for (const tbr of agg.rows) {
+        await prisma.noteDetail.create({
+          data: {
+            engagementId,
+            noteGroupId:   agg.noteGroupId,
+            subGroupName:  tbr.subGrouping || '',
+            accountNumber: tbr.accountNumber || '',
+            accountName:   tbr.accountName || '',
+            finalNet:      displaySign(Number(tbr.finalNet || 0), agg.assetLiability),
+            displayOrder:  0,
+          },
+        });
+      }
     }
   } catch (e) { console.warn('[NoteDetail]', e.message); }
 
-  try { await runAllChecks(engagementId, latest.id); } catch (_) {}
+  try { await runAllChecks(engagementId, latestCY.id); } catch (_) {}
   return result;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// GET FS (fetch existing)
+// GET FS — returns CY lines enriched with PY amounts as pyAmount field
 // ════════════════════════════════════════════════════════════════════════════
 async function getFS(engagementId) {
-  const [lines, noteGroups] = await Promise.all([
+  const [allLines, noteGroups] = await Promise.all([
     prisma.fSLine.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } }),
     prisma.noteGroup.findMany({ where: { engagementId } }),
   ]);
-  const ngMap    = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
-  const enriched = lines.map(l => ({ ...l, noteGroup: l.noteGroupId ? (ngMap.get(l.noteGroupId) || null) : null }));
-  return groupBySheet(enriched);
+
+  const ngMap   = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
+  const cyLines = allLines.filter(l => !l.isPriorYear);
+  const pyLines = allLines.filter(l => l.isPriorYear);
+
+  // Build PY lookup by groupName
+  const pyByGroup = new Map(pyLines.map(l => [l.groupName, l]));
+
+  // Enrich each CY line with its PY amount
+  const hasPY   = pyLines.length > 0;
+  const enriched = cyLines.map(l => ({
+    ...l,
+    noteGroup: l.noteGroupId ? (ngMap.get(l.noteGroupId) || null) : null,
+    pyAmount:  hasPY ? Number(pyByGroup.get(l.groupName)?.totalFinalNet ?? 0) : null,
+  }));
+
+  return { sheets: groupBySheet(enriched), hasPY };
 }
 
 function groupBySheet(lines) {

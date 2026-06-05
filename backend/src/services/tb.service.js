@@ -5,7 +5,7 @@ const crypto  = require('crypto');
 const { prisma } = require('../config/db');
 const mappingService = require('./mapping.service');
 
-const MAX_VERSIONS = 5;
+const MAX_CY_VERSIONS = 5; // cap only applies to Current Year versions
 
 function parseTBBuffer(buffer) {
   const wb   = xlsx.read(buffer, { type: 'buffer' });
@@ -53,7 +53,7 @@ function parseTBBuffer(buffer) {
     const aje    = parseFloat(r['Aje'] || r['AJE'] || r['Adjustment'] || 0) || 0;
 
     return { accountNumber: accountNumber || String(idx + 1), accountName, grouping, subGrouping, debit, credit, net, aje, finalNet };
-  }).filter(r => r.subGrouping && r.subGrouping.length > 0); // only need subGrouping to be present
+  }).filter(r => r.subGrouping && r.subGrouping.length > 0);
 }
 
 function checksum(buffer) {
@@ -85,12 +85,11 @@ async function uploadTB(engagementId, firmId, fileBuffer, uploadedByRef, isPrior
     engagementId, firmId
   );
   if (!engRows.length) throw Object.assign(new Error('Engagement not found'), { status: 404 });
-  const engagement = engRows[0];
 
   const hash       = checksum(fileBuffer);
   const parsedRows = parseTBBuffer(fileBuffer);
 
-  console.log(`[TB Upload] Valid rows after filter: ${parsedRows.length}`);
+  console.log(`[TB Upload] Valid rows after filter: ${parsedRows.length}, isPriorYear: ${isPriorYear}`);
 
   if (parsedRows.length === 0) {
     throw Object.assign(
@@ -100,62 +99,111 @@ async function uploadTB(engagementId, firmId, fileBuffer, uploadedByRef, isPrior
   }
 
   return await prisma.$transaction(async (tx) => {
-    const existingVersions = await tx.tBVersion.findMany({
-      where: { engagementId },
-      orderBy: { versionNumber: 'asc' },
-      include: { rows: { select: { accountNumber: true, finalNet: true } } },
-    });
+    if (isPriorYear) {
+      // ── PRIOR YEAR UPLOAD ──────────────────────────────────────────────
+      // PY is a REPLACE operation — delete any existing PY version and create fresh.
+      // PY versions are never counted toward the CY version cap.
+      // PY versions are never versioned (no incrementing number) and never diffed.
 
-    if (existingVersions.length >= MAX_VERSIONS) {
-      const oldest = existingVersions[0];
-      await tx.tBVersionDiff.deleteMany({ where: { tbVersionId: oldest.id } });
-      await tx.tBRow.deleteMany({ where: { tbVersionId: oldest.id } });
-      await tx.tBVersion.delete({ where: { id: oldest.id } });
-      existingVersions.shift();
-    }
+      const existingPY = await tx.tBVersion.findMany({
+        where: { engagementId, isPriorYear: true },
+      });
 
-    const newVersionNumber = existingVersions.length > 0
-      ? existingVersions[existingVersions.length - 1].versionNumber + 1
-      : 1;
-
-    const newVersion = await tx.tBVersion.create({
-      data: {
-        engagementId,
-        versionNumber:  newVersionNumber,
-        uploadedByRef,
-        rowCount:       parsedRows.length,
-        checksum:       hash,
-        isPriorYear:    isPriorYear || false,
-        label:          label || (isPriorYear ? 'Prior Year' : `Version ${newVersionNumber}`),
-        rows: {
-          create: parsedRows.map(r => ({
-            engagementId,
-            accountNumber: r.accountNumber,
-            accountName:   r.accountName,
-            grouping:      r.grouping ? String(r.grouping) : null,
-            subGrouping:   r.subGrouping,
-            debit:         r.debit,
-            credit:        r.credit,
-            net:           r.net,
-            aje:           r.aje,
-            finalNet:      r.finalNet,
-          })),
-        },
-      },
-    });
-
-    if (existingVersions.length > 0) {
-      const prevRows = existingVersions[existingVersions.length - 1].rows;
-      const diffs    = computeDiffs(
-        prevRows.map(r => ({ accountNumber: r.accountNumber, finalNet: Number(r.finalNet) })),
-        parsedRows
-      );
-      if (diffs.length > 0) {
-        await tx.tBVersionDiff.createMany({ data: diffs.map(d => ({ ...d, tbVersionId: newVersion.id })) });
+      for (const old of existingPY) {
+        await tx.tBVersionDiff.deleteMany({ where: { tbVersionId: old.id } });
+        await tx.tBRow.deleteMany({ where: { tbVersionId: old.id } });
+        await tx.tBVersion.delete({ where: { id: old.id } });
       }
-    }
 
-    return newVersion;
+      const pyVersion = await tx.tBVersion.create({
+        data: {
+          engagementId,
+          versionNumber:  0, // 0 = sentinel for "prior year" — never shown as V0
+          uploadedByRef,
+          rowCount:       parsedRows.length,
+          checksum:       hash,
+          isPriorYear:    true,
+          label:          label || 'Prior Year',
+          rows: {
+            create: parsedRows.map(r => ({
+              engagementId,
+              accountNumber: r.accountNumber,
+              accountName:   r.accountName,
+              grouping:      r.grouping ? String(r.grouping) : null,
+              subGrouping:   r.subGrouping,
+              debit:         r.debit,
+              credit:        r.credit,
+              net:           r.net,
+              aje:           r.aje,
+              finalNet:      r.finalNet,
+            })),
+          },
+        },
+      });
+
+      return pyVersion;
+    } else {
+      // ── CURRENT YEAR UPLOAD ────────────────────────────────────────────
+      // Only CY versions count toward MAX_CY_VERSIONS cap.
+      // Diffs are computed only between consecutive CY versions.
+
+      const existingCYVersions = await tx.tBVersion.findMany({
+        where: { engagementId, isPriorYear: false },
+        orderBy: { versionNumber: 'asc' },
+        include: { rows: { select: { accountNumber: true, finalNet: true } } },
+      });
+
+      if (existingCYVersions.length >= MAX_CY_VERSIONS) {
+        const oldest = existingCYVersions[0];
+        await tx.tBVersionDiff.deleteMany({ where: { tbVersionId: oldest.id } });
+        await tx.tBRow.deleteMany({ where: { tbVersionId: oldest.id } });
+        await tx.tBVersion.delete({ where: { id: oldest.id } });
+        existingCYVersions.shift();
+      }
+
+      const newVersionNumber = existingCYVersions.length > 0
+        ? existingCYVersions[existingCYVersions.length - 1].versionNumber + 1
+        : 1;
+
+      const newVersion = await tx.tBVersion.create({
+        data: {
+          engagementId,
+          versionNumber:  newVersionNumber,
+          uploadedByRef,
+          rowCount:       parsedRows.length,
+          checksum:       hash,
+          isPriorYear:    false,
+          label:          label || `Version ${newVersionNumber}`,
+          rows: {
+            create: parsedRows.map(r => ({
+              engagementId,
+              accountNumber: r.accountNumber,
+              accountName:   r.accountName,
+              grouping:      r.grouping ? String(r.grouping) : null,
+              subGrouping:   r.subGrouping,
+              debit:         r.debit,
+              credit:        r.credit,
+              net:           r.net,
+              aje:           r.aje,
+              finalNet:      r.finalNet,
+            })),
+          },
+        },
+      });
+
+      if (existingCYVersions.length > 0) {
+        const prevRows = existingCYVersions[existingCYVersions.length - 1].rows;
+        const diffs    = computeDiffs(
+          prevRows.map(r => ({ accountNumber: r.accountNumber, finalNet: Number(r.finalNet) })),
+          parsedRows
+        );
+        if (diffs.length > 0) {
+          await tx.tBVersionDiff.createMany({ data: diffs.map(d => ({ ...d, tbVersionId: newVersion.id })) });
+        }
+      }
+
+      return newVersion;
+    }
   });
 }
 
@@ -181,26 +229,24 @@ async function getVersionHistory(engagementId, firmId) {
      WHERE e.id = $1 AND c."firmId" = $2 LIMIT 1`, engagementId, firmId
   );
   if (!engRows.length) throw Object.assign(new Error('Not found'), { status: 404 });
-  const eng = engRows[0];
 
-  // Load versions
   const versions = await prisma.tBVersion.findMany({
     where: { engagementId },
-    orderBy: { versionNumber: 'desc' },
+    orderBy: [{ isPriorYear: 'asc' }, { versionNumber: 'desc' }],
     include: { _count: { select: { rows: true } } },
   });
 
-  // Load diffs via raw SQL to avoid enum type mismatch on action column
-  const vids = versions.map(v => v.id);
+  // Load diffs only for CY versions
+  const cyVersionIds = versions.filter(v => !v.isPriorYear).map(v => v.id);
   let diffs = [];
-  if (vids.length > 0) {
-    const ph = vids.map((_, i) => `$${i + 1}`).join(',');
+  if (cyVersionIds.length > 0) {
+    const ph = cyVersionIds.map((_, i) => `$${i + 1}`).join(',');
     diffs = await prisma.$queryRawUnsafe(
       `SELECT id, "tbVersionId", "accountNumber", "accountName",
               action::text as action, "oldFinalNet", "newFinalNet", "fieldChanged", "createdAt"
        FROM "TBVersionDiff" WHERE "tbVersionId" IN (${ph})
        ORDER BY "createdAt" ASC`,
-      ...vids
+      ...cyVersionIds
     );
   }
 
@@ -215,7 +261,6 @@ async function getVersionHistory(engagementId, firmId) {
 
 // Get previous year TB for same client — called by Prior Year tab
 async function getPreviousYearTB(engagementId, firmId) {
-  // Get current engagement details
   const engRows = await prisma.$queryRawUnsafe(
     `SELECT e.*, c."clientId" as cid, e."clientId", e."financialYear", e.method
      FROM "Engagement" e JOIN "Client" c ON c.id = e."clientId"
@@ -224,12 +269,9 @@ async function getPreviousYearTB(engagementId, firmId) {
   if (!engRows.length) return null;
   const eng = engRows[0];
 
-  // Parse current financial year to find previous year
-  // Formats: "2024-25", "2024", "FY2024-25"
   const fy = eng.financialYear || '';
   let prevFY = null;
 
-  // Format: "2024-25" → previous is "2023-24"
   const match1 = fy.match(/(\d{4})-(\d{2,4})/);
   if (match1) {
     const startYear = parseInt(match1[1]);
@@ -237,7 +279,6 @@ async function getPreviousYearTB(engagementId, firmId) {
     prevFY = `${startYear - 1}-${String(endShort - 1).padStart(match1[2].length, '0')}`;
   }
 
-  // Format: "2024" → previous is "2023"
   const match2 = fy.match(/^(\d{4})$/);
   if (match2) {
     prevFY = String(parseInt(match2[1]) - 1);
@@ -245,7 +286,6 @@ async function getPreviousYearTB(engagementId, firmId) {
 
   if (!prevFY) return null;
 
-  // Find previous year engagement for same client
   const prevEngRows = await prisma.$queryRawUnsafe(
     `SELECT e.id, e.name, e."financialYear", e.method
      FROM "Engagement" e
@@ -258,7 +298,6 @@ async function getPreviousYearTB(engagementId, firmId) {
 
   const prevEng = prevEngRows[0];
 
-  // Get the latest CY TB from previous engagement
   const prevTB = await prisma.tBVersion.findFirst({
     where: { engagementId: prevEng.id, isPriorYear: false },
     orderBy: { versionNumber: 'desc' },
