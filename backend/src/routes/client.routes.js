@@ -10,7 +10,7 @@ router.use(authGuard);
 router.get('/', async (req, res, next) => {
   try {
     const clients = await prisma.client.findMany({
-      where: { firmId: req.firmId, isActive: true },
+      where: { firmId: req.firmId, isActive: true, deletedAt: null },
       include: { _count: { select: { engagements: true } } },
       orderBy: { name: 'asc' },
     });
@@ -64,7 +64,7 @@ router.post('/', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) =>
 router.get('/:id', async (req, res, next) => {
   try {
     const client = await prisma.client.findFirst({
-      where: { id: req.params.id, firmId: req.firmId },
+      where: { id: req.params.id, firmId: req.firmId, deletedAt: null },
       include: { engagements: { orderBy: { createdAt: 'desc' } } },
     });
     if (!client) return res.status(404).json({ error: 'Not found' });
@@ -80,7 +80,7 @@ router.put('/:id', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) 
   try {
     const { name, address, cin, pan, gstin, country } = req.body;
     await prisma.client.updateMany({
-      where: { id: req.params.id, firmId: req.firmId },
+      where: { id: req.params.id, firmId: req.firmId, deletedAt: null },
       data: {
         ...(name    !== undefined && { name }),
         ...(address !== undefined && { address }),
@@ -98,7 +98,7 @@ router.put('/:id', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) 
 router.delete('/:id', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
   try {
     const existing = await prisma.client.findFirst({
-      where: { id: req.params.id, firmId: req.firmId },
+      where: { id: req.params.id, firmId: req.firmId, deletedAt: null },
     });
     if (!existing) return res.status(404).json({ error: 'Client not found' });
  

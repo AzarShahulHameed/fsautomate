@@ -1,3 +1,4 @@
+
 // src/routes/engagement.routes.js
 'use strict';
 const router = require('express').Router();
@@ -149,10 +150,10 @@ router.patch('/:engagementId/status', engagementGuard, async (req, res, next) =>
     }
  
     const isLocked = ['LOCKED', 'FILED'].includes(newStatus);
-    await prisma.$executeRawUnsafe(
-      `UPDATE "Engagement" SET status=$1, "isLocked"=$2, "statusUpdatedAt"=NOW(), "statusUpdatedBy"=$3, "updatedAt"=NOW() WHERE id=$4`,
-      newStatus, isLocked, req.user.id, req.params.engagementId
-    );
+    await prisma.engagement.update({
+      where: { id: req.params.engagementId },
+      data:  { status: newStatus, isLocked, statusUpdatedAt: new Date(), statusUpdatedBy: req.user.id },
+    });
  
     res.json({ status: newStatus, isLocked });
   } catch (err) { next(err); }
@@ -167,10 +168,10 @@ router.delete('/:engagementId', engagementGuard, requireRole('FIRM_ADMIN', 'MANA
     if (!eng) return res.status(404).json({ error: 'Engagement not found' });
     if (eng.isLocked) return res.status(403).json({ error: 'Cannot delete a locked engagement. Unlock first.' });
  
-    await prisma.$executeRawUnsafe(
-      `UPDATE "Engagement" SET "deletedAt"=NOW(), "isActive"=false, "updatedAt"=NOW() WHERE id=$1`,
-      req.params.engagementId
-    );
+    await prisma.engagement.update({
+      where: { id: req.params.engagementId },
+      data:  { deletedAt: new Date(), isActive: false },
+    });
     res.json({ deleted: true, recoverable: true });
   } catch (err) { next(err); }
 });
