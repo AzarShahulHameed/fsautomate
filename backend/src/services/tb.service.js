@@ -98,6 +98,17 @@ async function uploadTB(engagementId, firmId, fileBuffer, uploadedByRef, isPrior
     );
   }
 
+  // ── Duplicate file detection — reject identical re-uploads ─────────────────
+  const existingWithHash = await prisma.tBVersion.findFirst({
+    where: { engagementId, checksum: hash, isPriorYear },
+  });
+  if (existingWithHash) {
+    throw Object.assign(
+      new Error('This exact file has already been uploaded. Upload a different file or a new version.'),
+      { status: 409 }
+    );
+  }
+
   return await prisma.$transaction(async (tx) => {
     if (isPriorYear) {
       // ── PRIOR YEAR UPLOAD ──────────────────────────────────────────────

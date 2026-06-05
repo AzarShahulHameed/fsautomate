@@ -9,6 +9,12 @@ export const useStore = create(
       user:  null,
       firm:  null,
 
+      // Global request state — prevents stale data in sidebar/header during page loads
+      isLoading: false,
+      error:     null,
+      setLoading: (v) => set({ isLoading: v }),
+      setError:   (e) => set({ error: e }),
+
       setAuth: (token, user, firm) => set({ token, user, firm }),
 
       clearAuth: async () => {

@@ -4,12 +4,19 @@ import { schedulesAPI } from '../api/schedulesAPI';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
 
-const N  = v => Number(v || 0);
-const fmt = v => {
-  const n = N(v), abs = Math.abs(n);
-  const s = abs.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
-  return n < 0 ? `(${s})` : s;
-};
+const N = v => Number(v || 0);
+
+// Locale-aware formatter — determined per render from method/region
+// Passed as a closure where needed, or use the module-level fmt() with locale param
+function makeFmt(locale = 'en-IN') {
+  return v => {
+    const n = N(v), abs = Math.abs(n);
+    const s = abs.toLocaleString(locale, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+    return n < 0 ? `(${s})` : s;
+  };
+}
+// Default fmt uses en-IN — overridden per component with locale from store
+const fmt = makeFmt('en-IN');
 
 // ── Shared input ──────────────────────────────────────────────────────────────
 function Amt({ value, onChange, className = '' }) {
@@ -45,13 +52,62 @@ function PPESchedule({ engagementId, method, currency }) {
   const [saving, setSaving] = useState({});
   const [loading, setLoading] = useState(true);
 
+  // Method-specific PPE column configuration
+  const PPE_CONFIG = {
+    AS: {
+      std:          'Schedule II — Companies Act 2013',
+      showReval:    false,
+      showImpair:   false,
+      showExchDiff: false,
+      showRate:     true,
+      rateLabel:    'Rate %',
+    },
+    IND_AS: {
+      std:          'Ind AS 16 — Property, Plant and Equipment',
+      showReval:    true,
+      showImpair:   true,
+      showExchDiff: false,
+      showRate:     false,
+      rateLabel:    null,
+    },
+    IFRS: {
+      std:          'IAS 16 — Property, Plant and Equipment',
+      showReval:    true,
+      showImpair:   true,
+      showExchDiff: true,
+      showRate:     false,
+      rateLabel:    null,
+    },
+    IFRS_SME: {
+      std:          'IFRS for SMEs — Section 17 (Cost Model Only)',
+      showReval:    false,   // SME section 17 does not allow revaluation model
+      showImpair:   true,
+      showExchDiff: false,
+      showRate:     false,
+      rateLabel:    null,
+    },
+  };
+  const cfg    = PPE_CONFIG[method] || PPE_CONFIG.AS;
   const isIFRS = ['IFRS','IFRS_SME','IND_AS'].includes(method);
-  const std    = method === 'AS' ? 'Schedule II — Companies Act 2013' : method === 'IND_AS' ? 'Ind AS 16' : 'IAS 16';
+  const std    = cfg.std;
+
+  const [reconciliation, setReconciliation] = useState(null);
+  const [pyOpenings, setPyOpenings] = useState(null);
 
   useEffect(() => { load(); }, [engagementId]);
   async function load() {
     setLoading(true);
-    try { setRows(await schedulesAPI.getPPE(engagementId)); }
+    try {
+      const data = await schedulesAPI.getPPE(engagementId);
+      // Backend now returns { rows, _reconciliation, _anchors, _pyOpenings }
+      if (data.rows) {
+        setRows(data.rows);
+        setReconciliation(data._reconciliation || null);
+        setPyOpenings(data._pyOpenings || null);
+      } else {
+        setRows(Array.isArray(data) ? data : []);
+      }
+    }
     catch (e) { toast.error('Failed to load PPE: ' + e.message); }
     finally { setLoading(false); }
   }
@@ -78,15 +134,15 @@ function PPESchedule({ engagementId, method, currency }) {
 
   const calc = rows.map(r => ({
     ...r,
-    closingGross: N(r.openingGross) + N(r.additions) - N(r.disposals) + N(r.revaluationAmt),
+    closingGross: N(r.openingGross) + N(r.additions) - N(r.disposals) + N(r.revaluationAmt) + N(r.exchDiff||0),
     closingDepr:  r.isDepreciable ? N(r.openingDepr) + N(r.deprForYear) - N(r.deprOnDisposal) : 0,
-    netCY: (N(r.openingGross)+N(r.additions)-N(r.disposals)+N(r.revaluationAmt)) - (r.isDepreciable?N(r.openingDepr)+N(r.deprForYear)-N(r.deprOnDisposal):0) - N(r.impairmentAmt),
+    netCY: (N(r.openingGross)+N(r.additions)-N(r.disposals)+N(r.revaluationAmt)+N(r.exchDiff||0)) - (r.isDepreciable?N(r.openingDepr)+N(r.deprForYear)-N(r.deprOnDisposal):0) - N(r.impairmentAmt),
     netPY: N(r.openingGross) - N(r.openingDepr),
   }));
 
   const tot = calc.reduce((t,r) => ({
     og:t.og+N(r.openingGross), add:t.add+N(r.additions), dis:t.dis+N(r.disposals),
-    rev:t.rev+N(r.revaluationAmt), cg:t.cg+r.closingGross,
+    rev:t.rev+N(r.revaluationAmt), exd:t.exd+N(r.exchDiff||0), cg:t.cg+r.closingGross,
     od:t.od+N(r.openingDepr), df:t.df+N(r.deprForYear), dd:t.dd+N(r.deprOnDisposal),
     cd:t.cd+r.closingDepr, imp:t.imp+N(r.impairmentAmt), cy:t.cy+r.netCY, py:t.py+r.netPY,
   }), {og:0,add:0,dis:0,rev:0,cg:0,od:0,df:0,dd:0,cd:0,imp:0,cy:0,py:0});
@@ -110,7 +166,7 @@ function PPESchedule({ engagementId, method, currency }) {
         method={method}
         title="PPE Schedule"
         dataNeeded="Opening Gross Block and Opening Accumulated Depreciation from prior year audited accounts. Additions and depreciation for the current year from your TB/fixed asset register."
-        note={`Closing balances are auto-computed. Currency: ${currency}. ${isIFRS ? 'Revaluation and Impairment columns shown for ' + std + '.' : ''}`}
+        note={`Closing balances are auto-computed. Currency: ${currency}. ${cfg.showReval ? 'Revaluation model applicable under ' + std + '.' : ''} ${cfg.showImpair ? 'Impairment assessed per IAS 36 / Ind AS 36.' : ''}`.trim()}
       />
 
       <div className="overflow-x-auto rounded-xl border border-slate-200">
@@ -118,15 +174,15 @@ function PPESchedule({ engagementId, method, currency }) {
           <thead>
             <tr>
               <th className={`${th} text-left w-40`} rowSpan={2}>Asset Class</th>
-              <th className={th} colSpan={isIFRS ? 5 : 4}>Gross Block ({currency})</th>
+              <th className={th} colSpan={4 + (cfg.showReval?1:0) + (cfg.showExchDiff?1:0)}>Gross Block ({currency})</th>
               <th className={th} colSpan={4}>Depreciation ({currency})</th>
-              {isIFRS && <th className={th} rowSpan={2}>Impairment</th>}
+              {cfg.showImpair && <th className={th} rowSpan={2}>Impairment</th>}
               <th className={`${th} bg-indigo-800`} colSpan={2}>Net Block ({currency})</th>
               <th className={`${th} w-8`} rowSpan={2}></th>
             </tr>
             <tr>
-              {['Opening','Additions','Disposals',...(isIFRS?['Revaluation']:[]),'Closing','Opening','For Year','On Disposal','Closing','CY','PY'].map(h=>(
-                <th key={h} className={`${th} ${h==='CY'?'bg-indigo-700':''}`}>{h}</th>
+              {['Opening','Additions','Disposals',...(cfg.showReval?['Revaluation']:[]),...(cfg.showExchDiff?['Exch Diff']:[]),'Closing (TB ↓)','Opening','For Year','On Disposal','Closing',...(cfg.showImpair?['Impairment']:[]),'CY Net Block','PY Net Block'].map(h=>(
+                <th key={h} className={`${th} ${h.includes('CY')?'bg-indigo-700':h.includes('TB')?'bg-emerald-800':''}`}>{h}</th>
               ))}
             </tr>
           </thead>
@@ -142,7 +198,7 @@ function PPESchedule({ engagementId, method, currency }) {
                     </label>
                   </div>
                 </td>
-                {[['openingGross',r.openingGross],['additions',r.additions],['disposals',r.disposals],...(isIFRS?[['revaluationAmt',r.revaluationAmt]]:[])].map(([f,v])=>(
+                {[['openingGross',r.openingGross],['additions',r.additions],['disposals',r.disposals],...(cfg.showReval?[['revaluationAmt',r.revaluationAmt]]:[]),...(cfg.showExchDiff?[['exchDiff',r.exchDiff||0]]:[])].map(([f,v])=>(
                   <td key={f} className={td}><Amt value={v} onChange={val=>upd(r.id,f,val)}/></td>
                 ))}
                 <td className={`${td} font-mono text-right font-medium bg-slate-50`}>{fmt(r.closingGross)}</td>
@@ -150,7 +206,7 @@ function PPESchedule({ engagementId, method, currency }) {
                   <td key={f} className={td}>{r.isDepreciable?<Amt value={v} onChange={val=>upd(r.id,f,val)}/>:<span className="text-slate-300 text-xs px-2">—</span>}</td>
                 ))}
                 <td className={`${td} font-mono text-right font-medium bg-slate-50`}>{r.isDepreciable?fmt(r.closingDepr):'—'}</td>
-                {isIFRS&&<td className={td}><Amt value={r.impairmentAmt} onChange={val=>upd(r.id,'impairmentAmt',val)}/></td>}
+                {cfg.showImpair&&<td className={td}><Amt value={r.impairmentAmt} onChange={val=>upd(r.id,'impairmentAmt',val)}/></td>}
                 <td className={`${td} font-mono text-right font-bold text-indigo-700 bg-indigo-50`}>{fmt(r.netCY)}</td>
                 <td className={`${td} font-mono text-right text-slate-500`}>{fmt(r.netPY)}</td>
                 <td className="border border-slate-200 px-1 py-1">
@@ -163,7 +219,7 @@ function PPESchedule({ engagementId, method, currency }) {
             ))}
             <tr className="bg-slate-800 text-white font-bold">
               <td className="px-2 py-2 text-xs border border-slate-700">TOTAL</td>
-              {[tot.og,tot.add,tot.dis,...(isIFRS?[tot.rev]:[]),tot.cg,tot.od,tot.df,tot.dd,tot.cd,...(isIFRS?[tot.imp]:[]),tot.cy,tot.py].map((v,i)=>(
+              {[tot.og,tot.add,tot.dis,...(cfg.showReval?[tot.rev]:[]),...(cfg.showExchDiff?[tot.exd||0]:[]),tot.cg,tot.od,tot.df,tot.dd,tot.cd,...(cfg.showImpair?[tot.imp]:[]),tot.cy,tot.py].map((v,i)=>(
                 <td key={i} className="px-2 py-2 text-xs font-mono text-right border border-slate-700">{fmt(v)}</td>
               ))}
               <td className="border border-slate-700"></td>
@@ -171,6 +227,44 @@ function PPESchedule({ engagementId, method, currency }) {
           </tbody>
         </table>
       </div>
+
+      {/* Reconciliation banner */}
+      {reconciliation && (
+        <div className={`mt-4 rounded-xl p-4 border flex items-start gap-3 ${
+          reconciliation.balanced === null ? 'bg-slate-50 border-slate-200 text-slate-600'
+          : reconciliation.balanced ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          : 'bg-red-50 border-red-200 text-red-800'
+        }`}>
+          <span className="text-xl flex-shrink-0">
+            {reconciliation.balanced === null ? 'ℹ️' : reconciliation.balanced ? '✓' : '⚠'}
+          </span>
+          <div className="flex-1">
+            <p className="font-semibold text-sm">PPE Schedule Reconciliation</p>
+            <p className="text-sm mt-0.5">{reconciliation.message}</p>
+            {!reconciliation.balanced && reconciliation.balanced !== null && (
+              <p className="text-xs mt-1 opacity-80">
+                Adjust opening balances, additions, disposals or depreciation until the schedule closing net block equals the Balance Sheet PPE amount.
+                Run Validation Checks to track progress.
+              </p>
+            )}
+          </div>
+          {reconciliation.balanced !== null && (
+            <div className="text-right flex-shrink-0">
+              <div className="text-xs opacity-70">Schedule</div>
+              <div className="font-mono font-bold">{fmt(reconciliation.actualClosing)}</div>
+              <div className="text-xs opacity-70 mt-1">Balance Sheet</div>
+              <div className="font-mono font-bold">{fmt(reconciliation.expectedClosing)}</div>
+            </div>
+          )}
+        </div>
+      )}
+      {pyOpenings?.hasData && !rows.some(r => Number(r.openingGross) > 0) && (
+        <div className="mt-3 rounded-xl p-3 bg-blue-50 border border-blue-200 text-blue-800 text-sm flex items-center gap-2">
+          <span>💡</span>
+          <span>Prior year data available — enter opening gross block and opening accumulated depreciation.
+            Prior year net block: <strong>{fmt(pyOpenings.amount)}</strong></span>
+        </div>
+      )}
     </div>
   );
 }
@@ -184,10 +278,22 @@ function IntangibleSchedule({ engagementId, method, currency }) {
   const [loading, setLoading] = useState(true);
   const isIFRS = ['IFRS','IFRS_SME','IND_AS'].includes(method);
 
+  const [reconciliation, setReconciliation] = useState(null);
+  const [pyOpenings, setPyOpenings] = useState(null);
+
   useEffect(() => { load(); }, [engagementId]);
   async function load() {
     setLoading(true);
-    try { setRows(await schedulesAPI.getIntangibles(engagementId)); }
+    try {
+      const data = await schedulesAPI.getIntangibles(engagementId);
+      if (data.rows) {
+        setRows(data.rows);
+        setReconciliation(data._reconciliation || null);
+        setPyOpenings(data._pyOpenings || null);
+      } else {
+        setRows(Array.isArray(data) ? data : []);
+      }
+    }
     catch { toast.error('Failed to load intangibles'); }
     finally { setLoading(false); }
   }
@@ -260,7 +366,7 @@ function IntangibleSchedule({ engagementId, method, currency }) {
                   <td key={f} className={td}>{r.isIndefinite?<span className="text-slate-300 px-2 text-xs">N/A</span>:<Amt value={v} onChange={val=>upd(r.id,f,val)}/>}</td>
                 ))}
                 <td className={`${td} font-mono text-right font-medium bg-slate-50`}>{r.isIndefinite?'—':fmt(r.ca)}</td>
-                {isIFRS&&<td className={td}><Amt value={r.impairmentAmt} onChange={val=>upd(r.id,'impairmentAmt',val)}/></td>}
+                {cfg.showImpair&&<td className={td}><Amt value={r.impairmentAmt} onChange={val=>upd(r.id,'impairmentAmt',val)}/></td>}
                 <td className={`${td} font-mono text-right font-bold text-indigo-700 bg-indigo-50`}>{fmt(r.netCY)}</td>
                 <td className={`${td} font-mono text-right text-slate-500`}>{fmt(r.netPY)}</td>
                 <td className={td}><input value={r.usefulLife||''} onChange={e=>upd(r.id,'usefulLife',e.target.value)} className="w-full text-xs border-0 outline-none bg-transparent" placeholder="e.g. 5 years"/></td>
@@ -302,10 +408,17 @@ function RelatedParty({ engagementId, method, currency }) {
   const [showT, setShowT]     = useState(false);
   const isKMP = parties.find(p=>p.id===active)?.relationship === 'KMP';
 
+  const [bsAnchors, setBsAnchors] = useState(null);
   useEffect(()=>{ load(); },[engagementId]);
   async function load() {
     setLoading(true);
-    try { const d=await schedulesAPI.getRelatedParties(engagementId); setParties(d); if(d.length>0&&!active) setActive(d[0].id); }
+    try {
+      const data = await schedulesAPI.getRelatedParties(engagementId);
+      const list = data.parties || data;
+      setParties(Array.isArray(list) ? list : []);
+      if (data._anchors) setBsAnchors(data._anchors);
+      if (list.length > 0 && !active) setActive(list[0].id);
+    }
     catch { toast.error('Failed to load'); }
     finally { setLoading(false); }
   }
@@ -502,7 +615,13 @@ function EPSWorking({ engagementId, method, currency }) {
       </div>
       <Disclaimer method={method} title="EPS Working"
         dataNeeded="Weighted average number of equity shares outstanding during the year. Face value per share. Preference dividend if any. Dilutive instruments (options, convertibles) if applicable."
-        note="PAT is auto-filled from the generated P&L. Prior year PAT and shares must be entered manually."/>
+        note="PAT is automatically synchronised from the generated Financial Statements — you cannot edit it here. Prior year PAT and shares must be entered manually, or click the suggestion link if prior year FS is available."/>
+      {(!data.patFromPL || N(data.patFromPL) === 0) && (
+        <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-xl text-sm text-amber-800 flex items-center gap-2">
+          <span>⚠</span>
+          <span>PAT is zero — please Generate Financial Statements first, then return here.</span>
+        </div>
+      )}
 
       {!required && <div className="mb-4 p-3 bg-slate-100 rounded-lg text-sm text-slate-600">EPS not mandatory under IFRS for SMEs but included as voluntary disclosure.</div>}
 
@@ -517,7 +636,20 @@ function EPSWorking({ engagementId, method, currency }) {
           <div><label className="block text-xs font-medium text-slate-600 mb-1">Dilutive Shares (Nos.)</label>
             <input type="number" value={data.dilutiveShares||''} onChange={e=>set('dilutiveShares',Number(e.target.value))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 text-right font-mono" placeholder="0"/></div>
           <div><label className="block text-xs font-medium text-slate-600 mb-1">Face Value per Share ({currency})</label><Amt value={data.faceValue} onChange={v=>set('faceValue',v)}/></div>
-          <div><label className="block text-xs font-medium text-slate-600 mb-1 text-amber-600">Prior Year PAT ({currency}) — manual</label><Amt value={data.patPY} onChange={v=>set('patPY',v)}/></div>
+          <div>
+            <label className="block text-xs font-medium text-slate-600 mb-1 text-amber-600">
+              Prior Year PAT ({currency})
+              {data._pyFsPAT !== undefined && data._pyFsPAT !== null && Math.abs(N(data.patPY) - N(data._pyFsPAT)) > 1 && (
+                <button onClick={()=>set('patPY', data._pyFsPAT)} className="ml-2 text-xs text-indigo-600 underline">
+                  Use PY FS: {fmt(data._pyFsPAT)}
+                </button>
+              )}
+            </label>
+            <Amt value={data.patPY} onChange={v=>set('patPY',v)}/>
+            {data._pyFsPAT !== null && data._pyFsPAT !== undefined && (
+              <p className="text-xs text-slate-400 mt-0.5">PY Financial Statements PAT: {fmt(data._pyFsPAT)}</p>
+            )}
+          </div>
           <div><label className="block text-xs font-medium text-slate-600 mb-1 text-amber-600">Prior Year Wtd Avg Shares — manual</label>
             <input type="number" value={data.sharesPY||''} onChange={e=>set('sharesPY',Number(e.target.value))} className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 text-right font-mono" placeholder="1000000"/></div>
         </div>
@@ -532,9 +664,9 @@ function EPSWorking({ engagementId, method, currency }) {
               ['Profit After Tax ('+currency+')', fmt(data.patFromPL), fmt(data.patPY)],
               ['Less: Preference Dividend ('+currency+')', fmt(data.prefDividend), '—'],
               ['Net Profit for Equity Holders ('+currency+')', fmt(net), fmt(data.patPY), true],
-              ['Weighted Avg Shares (Nos.)', N(data.weightedAvgShares).toLocaleString('en-IN'), N(data.sharesPY).toLocaleString('en-IN')],
+              ['Weighted Avg Shares (Nos.)', N(data.weightedAvgShares).toLocaleString(), N(data.sharesPY).toLocaleString()],
               ['Basic EPS ('+currency+') — '+std, basic.toFixed(2), basicPY.toFixed(2), true],
-              ['Add: Dilutive Shares (Nos.)', N(data.dilutiveShares).toLocaleString('en-IN'), '—'],
+              ['Add: Dilutive Shares (Nos.)', N(data.dilutiveShares).toLocaleString(), '—'],
               ['Diluted EPS ('+currency+')', diluted.toFixed(2), '—', true],
               ['Face Value per Share ('+currency+')', fmt(data.faceValue), fmt(data.faceValue)],
             ].map(([l,cy,py,bold],i)=>(
@@ -561,19 +693,38 @@ function DeferredTax({ engagementId, method, currency }) {
   const hasOCI = ['IND_AS','IFRS'].includes(method);
   const std    = method==='AS'?'AS 22':method==='IND_AS'?'Ind AS 12':'IAS 12';
 
+  const [reconciliation, setReconciliation] = useState(null);
+  const [pyOpenings, setPyOpenings] = useState(null);
   useEffect(()=>{ load(); },[engagementId]);
-  async function load() { setLoading(true); try { setItems(await schedulesAPI.getDeferredTax(engagementId)); } catch { toast.error('Failed'); } finally { setLoading(false); } }
+  async function load() {
+    setLoading(true);
+    try {
+      const data = await schedulesAPI.getDeferredTax(engagementId);
+      if (data.items) {
+        setItems(data.items);
+        setReconciliation(data._reconciliation || null);
+        setPyOpenings(data._pyOpenings || null);
+      } else {
+        setItems(Array.isArray(data) ? data : []);
+      }
+    }
+    catch { toast.error('Failed'); }
+    finally { setLoading(false); }
+  }
   const upd=(id,f,v)=>setItems(p=>p.map(i=>i.id===id?{...i,[f]:v}:i));
   async function save(item) { setSaving(s=>({...s,[item.id]:true})); try { await schedulesAPI.saveDTItem(engagementId,item.id,item); toast.success('Saved'); } catch { toast.error('Failed'); } finally { setSaving(s=>({...s,[item.id]:false})); } }
   async function add() { try { const r=await schedulesAPI.addDTItem(engagementId,{description:'New timing difference',isAsset:true}); setItems(p=>[...p,r]); } catch { toast.error('Failed'); } }
   async function del(id) { try { await schedulesAPI.deleteDTItem(engagementId,id); setItems(p=>p.filter(i=>i.id!==id)); } catch { toast.error('Failed'); } }
 
+  // Backend now returns pre-computed closingTaxEffect etc.
+  // Fall back to local computation if backend returns raw items
   const calc = items.map(r=>{
     const rate=N(r.taxRate)/100;
-    const open=N(r.openingDiff)*rate;
-    const pl=(N(r.createdInPL)-N(r.reversedInPL))*rate;
-    const oci=(N(r.createdInOCI)-N(r.reversedInOCI))*rate;
-    return {...r,openTA:open,plEffect:pl,ociEffect:oci,closingTA:open+pl+oci};
+    const open=r.openingTaxEffect !== undefined ? N(r.openingTaxEffect) : N(r.openingDiff)*rate;
+    const pl  =r.plTaxEffect      !== undefined ? N(r.plTaxEffect)      : (N(r.createdInPL)-N(r.reversedInPL))*rate;
+    const oci =r.ociTaxEffect     !== undefined ? N(r.ociTaxEffect)     : (N(r.createdInOCI)-N(r.reversedInOCI))*rate;
+    const closingTA = r.closingTaxEffect !== undefined ? N(r.closingTaxEffect) : open+pl+oci;
+    return {...r, openTA:open, plEffect:pl, ociEffect:oci, closingTA };
   });
   const dta=calc.filter(r=>r.isAsset), dtl=calc.filter(r=>!r.isAsset);
   const netDTA=dta.reduce((s,r)=>s+r.closingTA,0)-dtl.reduce((s,r)=>s+r.closingTA,0);
@@ -638,6 +789,27 @@ function DeferredTax({ engagementId, method, currency }) {
           </tbody>
         </table>
       </div>
+      {reconciliation && (
+        <div className={`mt-4 rounded-xl p-4 border flex items-start gap-3 ${
+          reconciliation.balanced === null ? 'bg-slate-50 border-slate-200 text-slate-600'
+          : reconciliation.balanced ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+          : 'bg-red-50 border-red-200 text-red-800'
+        }`}>
+          <span className="text-xl flex-shrink-0">{reconciliation.balanced === null ? 'ℹ️' : reconciliation.balanced ? '✓' : '⚠'}</span>
+          <div className="flex-1">
+            <p className="font-semibold text-sm">Deferred Tax Reconciliation</p>
+            <p className="text-sm mt-0.5">{reconciliation.message}</p>
+          </div>
+          {reconciliation.balanced !== null && (
+            <div className="text-right flex-shrink-0">
+              <div className="text-xs opacity-70">Schedule Net</div>
+              <div className="font-mono font-bold">{fmt(reconciliation.scheduleNetDT)}</div>
+              <div className="text-xs opacity-70 mt-1">BS Net DTA/DTL</div>
+              <div className="font-mono font-bold">{fmt(reconciliation.fsNetDT)}</div>
+            </div>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -757,13 +929,10 @@ const TABS = [
 
 export default function Schedules() {
   const { engagementId } = useParams();
-  const { currentEngagement, currentClient, firm } = useStore();
+  const { currentEngagement, getCurrency } = useStore();
   const method   = currentEngagement?.method || 'AS';
-  // Method is always authoritative for currency
-  const currency = (method === 'IFRS' || method === 'IFRS_SME') ? 'AED'
-    : (method === 'AS' || method === 'IND_AS') ? 'INR'
-    : (currentClient?.region === 'UAE' || firm?.region === 'UAE') ? 'AED'
-    : 'INR';
+  const currency = getCurrency();
+  const locale   = (method === 'IFRS' || method === 'IFRS_SME' || currency === 'AED') ? 'en-US' : 'en-IN';
   const [activeTab, setActiveTab] = useState('ppe');
 
   return (

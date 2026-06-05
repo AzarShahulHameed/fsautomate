@@ -143,8 +143,14 @@ function classify(groupName, method) {
 // ════════════════════════════════════════════════════════════════════════════
 // AGGREGATE TB ROWS → FS LINES
 // Pure function — called for both CY and PY TB separately.
+//
+// Classification priority (MNC standard):
+//   1. masterGrouping.assetLiability + masterGrouping.sheet from DB (authoritative)
+//   2. classify() keyword fallback (for custom/unmapped groupNames only)
+//
+// This eliminates the keyword-matching ambiguity for all seeded master items.
 // ════════════════════════════════════════════════════════════════════════════
-function aggregateTBRows(tbRows, mappingIndex, method) {
+function aggregateTBRows(tbRows, mappingIndex, method, masterIndex = new Map()) {
   const aggregates  = new Map();
   const unmappedSGs = new Set();
 
@@ -157,8 +163,20 @@ function aggregateTBRows(tbRows, mappingIndex, method) {
       continue;
     }
 
-    const { al, sheet } = classify(mapping.groupName, method);
-    const rawNet        = Number(row.finalNet || 0);
+    // Priority 1: read classification from MasterGrouping (authoritative DB source)
+    // Priority 2: keyword-based classify() as fallback
+    let al, sheet;
+    const masterRow = mapping.masterGroupingId ? masterIndex.get(mapping.masterGroupingId) : null;
+    if (masterRow?.assetLiability && masterRow?.sheet) {
+      al    = masterRow.assetLiability;
+      sheet = masterRow.sheet;
+    } else {
+      const classified = classify(mapping.groupName, method);
+      al    = classified.al;
+      sheet = classified.sheet;
+    }
+
+    const rawNet = Number(row.finalNet || 0);
 
     if (!aggregates.has(mapping.groupName)) {
       aggregates.set(mapping.groupName, {
@@ -246,8 +264,19 @@ async function generateFS(engagementId, firmId) {
 
   const mappingIndex = new Map(mappings.map(m => [m.subGrouping.trim().toLowerCase(), m]));
 
+  // ── Build MasterGrouping index for authoritative classification ───────────
+  const masterGroupingIds = [...new Set(mappings.map(m => m.masterGroupingId).filter(Boolean))];
+  let masterIndex = new Map();
+  if (masterGroupingIds.length > 0) {
+    const masterRows = await prisma.masterGrouping.findMany({
+      where: { id: { in: masterGroupingIds } },
+      select: { id: true, assetLiability: true, sheet: true, displayOrder: true, noteGroupId: true },
+    });
+    masterIndex = new Map(masterRows.map(r => [r.id, r]));
+  }
+
   // ── Aggregate CY ──────────────────────────────────────────────────────────
-  const { aggregates: cyAggs, unmappedSGs } = aggregateTBRows(latestCY.rows, mappingIndex, method);
+  const { aggregates: cyAggs, unmappedSGs } = aggregateTBRows(latestCY.rows, mappingIndex, method, masterIndex);
 
   const roundingThreshold = currency === 'AED' ? 10 : 100;
   const cyBSCheck = {
@@ -275,7 +304,7 @@ async function generateFS(engagementId, firmId) {
   let pyAggs = new Map();
   let hasPY  = false;
   if (latestPY && latestPY.rows.length > 0) {
-    const { aggregates } = aggregateTBRows(latestPY.rows, mappingIndex, method);
+    const { aggregates } = aggregateTBRows(latestPY.rows, mappingIndex, method, masterIndex);
     const pyBSCheck = {
       assets: [...aggregates.values()].filter(a=>a.sheet==='BS'&&a.assetLiability==='Assets').reduce((s,a)=>s+a.totalFinalNet,0),
       equity: [...aggregates.values()].filter(a=>a.sheet==='BS'&&a.assetLiability==='Equity').reduce((s,a)=>s+a.totalFinalNet,0),

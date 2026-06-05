@@ -13,10 +13,14 @@ router.post('/register', async (req, res, next) => {
     const currency = region === 'UAE' ? 'AED' : 'INR';
     const slug = (firmSlug || firmName.toLowerCase().replace(/\s+/g,'-').replace(/[^a-z0-9-]/g,'')).slice(0,60);
     const passwordHash = await bcrypt.hash(password, 12);
-    const firm = await prisma.firm.upsert({
-      where: { slug },
-      update: {},
-      create: { name: firmName, slug, region: region||'India', currency },
+    // Prevent slug collision: if slug already exists, generate a unique one
+    const existingFirm = await prisma.firm.findUnique({ where: { slug } });
+    const finalSlug = existingFirm
+      ? slug + '-' + Date.now().toString(36).slice(-4) // append short unique suffix
+      : slug;
+
+    const firm = await prisma.firm.create({
+      data: { name: firmName, slug: finalSlug, region: region || 'India', currency },
     });
     const user = await prisma.user.create({
       data: { firmId: firm.id, email, passwordHash, name, role: 'FIRM_ADMIN', avatar: avatar||null, phone: phone||null, designation: designation||null },
@@ -28,16 +32,42 @@ router.post('/register', async (req, res, next) => {
   }
 });
 
+// In-memory login attempt tracker — resets on restart
+// For production: use Redis with TTL
+const loginAttempts = new Map(); // email -> { count, firstAt }
+const MAX_ATTEMPTS  = 10;
+const LOCKOUT_MS    = 15 * 60 * 1000; // 15 minutes
+
 router.post('/login', async (req, res, next) => {
   try {
     const { email, password } = req.body;
+    if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
+
+    // Brute force check
+    const attemptKey = email.toLowerCase().trim();
+    const attempt    = loginAttempts.get(attemptKey);
+    if (attempt && attempt.count >= MAX_ATTEMPTS) {
+      const elapsed = Date.now() - attempt.firstAt;
+      if (elapsed < LOCKOUT_MS) {
+        const remaining = Math.ceil((LOCKOUT_MS - elapsed) / 60000);
+        return res.status(429).json({ error: `Account temporarily locked due to too many failed attempts. Try again in ${remaining} minute${remaining !== 1 ? 's' : ''}.` });
+      }
+      loginAttempts.delete(attemptKey); // lockout expired
+    }
+
     const user = await prisma.user.findFirst({
-      where: { email, isActive: true },
+      where: { email: email.toLowerCase().trim(), isActive: true },
       include: { firm: true },
     });
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+      // Record failed attempt
+      const current = loginAttempts.get(attemptKey) || { count: 0, firstAt: Date.now() };
+      loginAttempts.set(attemptKey, { count: current.count + 1, firstAt: current.firstAt });
       return res.status(401).json({ error: 'Invalid email or password' });
     }
+
+    // Successful login — clear attempts
+    loginAttempts.delete(attemptKey);
     const token = jwt.sign({ userId: user.id, firmId: user.firmId }, process.env.JWT_SECRET, { expiresIn: '8h' });
     const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
     await prisma.userSession.create({ data: { userId: user.id, token, expiresAt } });
@@ -79,103 +109,6 @@ router.get('/page-state', authGuard, async (req, res, next) => {
     res.json({ pageState: s?.pageState || null });
   } catch (err) { next(err); }
 });
-
-// POST /api/auth/forgot-password — send reset OTP to email
-router.post('/forgot-password', async (req, res, next) => {
-  try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required' });
-
-    const users = await prisma.$queryRawUnsafe(
-      `SELECT id, name, email FROM "User" WHERE LOWER(email)=$1 AND "isActive"=true LIMIT 1`,
-      email.toLowerCase().trim()
-    );
-
-    // Always return success — don't reveal if email exists (security)
-    if (!users.length) {
-      return res.json({ sent: true, message: 'If that email exists, a reset code has been sent.' });
-    }
-
-    const user = users[0];
-    const otp  = Math.floor(100000 + Math.random() * 900000).toString();
-    const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
-
-    // Store OTP
-    await prisma.$executeRawUnsafe(
-      `INSERT INTO "OTPVerification" ("userId", type, target, otp, "expiresAt")
-       VALUES ($1, 'email', $2, $3, $4)`,
-      user.id, email.toLowerCase().trim(), otp, expiresAt
-    );
-
-    // Log OTP (replace with email service in production)
-    console.log(`
-===== PASSWORD RESET OTP =====`);
-    console.log(`Email: ${email}`);
-    console.log(`OTP:   ${otp}`);
-    console.log(`Valid: 15 minutes`);
-    console.log(`==============================
-`);
-
-    res.json({
-      sent: true,
-      message: 'Reset code sent to your email.',
-      ...(process.env.NODE_ENV !== 'production' ? { otp } : {}),
-    });
-  } catch (err) { next(err); }
-});
-
-// POST /api/auth/reset-password — verify OTP and set new password
-router.post('/reset-password', async (req, res, next) => {
-  try {
-    const { email, otp, newPassword } = req.body;
-    if (!email || !otp || !newPassword) return res.status(400).json({ error: 'Email, OTP and new password required' });
-    if (newPassword.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-
-    const users = await prisma.$queryRawUnsafe(
-      `SELECT id FROM "User" WHERE LOWER(email)=$1 AND "isActive"=true LIMIT 1`,
-      email.toLowerCase().trim()
-    );
-    if (!users.length) return res.status(400).json({ error: 'Invalid email' });
-
-    const userId = users[0].id;
-
-    // Find valid OTP
-    const records = await prisma.$queryRawUnsafe(
-      `SELECT * FROM "OTPVerification"
-       WHERE "userId"=$1 AND type='email' AND target=$2 AND verified=false AND "expiresAt" > NOW()
-       ORDER BY "createdAt" DESC LIMIT 1`,
-      userId, email.toLowerCase().trim()
-    );
-    if (!records.length) return res.status(400).json({ error: 'OTP expired or invalid. Request a new one.' });
-
-    const record = records[0];
-    if (parseInt(record.attempts) >= 5) return res.status(400).json({ error: 'Too many wrong attempts. Request a new OTP.' });
-
-    await prisma.$executeRawUnsafe(`UPDATE "OTPVerification" SET attempts=attempts+1 WHERE id=$1`, record.id);
-
-    if (record.otp !== otp.trim()) {
-      const left = 4 - parseInt(record.attempts);
-      return res.status(400).json({ error: `Wrong OTP. ${left} attempt${left !== 1 ? 's' : ''} remaining.` });
-    }
-
-    // Mark verified and update password
-    await prisma.$executeRawUnsafe(`UPDATE "OTPVerification" SET verified=true WHERE id=$1`, record.id);
-
-    const bcrypt = require('bcryptjs');
-    const hash   = await bcrypt.hash(newPassword, 12);
-    await prisma.$executeRawUnsafe(
-      `UPDATE "User" SET "passwordHash"=$1, "updatedAt"=NOW() WHERE id=$2`,
-      hash, userId
-    );
-
-    // Invalidate all sessions (force re-login everywhere)
-    await prisma.userSession.deleteMany({ where: { userId } });
-
-    res.json({ success: true, message: 'Password reset successfully. Please log in with your new password.' });
-  } catch (err) { next(err); }
-});
-
-module.exports = router;
 
 // PATCH /api/auth/profile
 router.patch('/profile', authGuard, async (req, res, next) => {
@@ -256,3 +189,5 @@ router.patch('/password', authGuard, async (req, res, next) => {
     res.json({ message: 'Password changed' });
   } catch (err) { next(err); }
 });
+
+module.exports = router;

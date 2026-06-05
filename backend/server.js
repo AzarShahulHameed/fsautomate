@@ -8,7 +8,6 @@ const rateLimit = require('express-rate-limit');
 const session   = require('express-session');
 
 const { prisma }          = require('./src/config/db');
-const { sanitizeMiddleware, sizeLimitCheck, preventParamPollution } = require('./src/middleware/security');
 const { auditMiddleware } = require('./src/middleware/audit');
 const authRoutes          = require('./src/routes/auth.routes');
 const clientRoutes        = require('./src/routes/client.routes');
@@ -21,12 +20,19 @@ const reportRoutes        = require('./src/routes/report.routes');
 const exportRoutes        = require('./src/routes/export.routes');
 const schedulesRoutes     = require('./src/routes/schedules.routes');
 const uploadRoutes        = require('./src/routes/upload.routes');
-const preferencesRoutes   = require('./src/routes/preferences.routes');
-const otpRoutes           = require('./src/routes/otp.routes');
-const oauthRoutes         = require('./src/routes/oauth.routes');
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
+
+// ── Fail fast on missing required secrets ─────────────────────────────────
+if (process.env.NODE_ENV === 'production') {
+  const REQUIRED_ENV = ['JWT_SECRET', 'SESSION_SECRET', 'DATABASE_URL'];
+  const missing = REQUIRED_ENV.filter(k => !process.env[k]);
+  if (missing.length > 0) {
+    console.error(`[FATAL] Missing required environment variables: ${missing.join(', ')}`);
+    process.exit(1);
+  }
+}
 
 // Required for Render/Vercel reverse proxy — fixes rate limiting and cookies
 app.set('trust proxy', 1);
@@ -35,24 +41,12 @@ app.set('trust proxy', 1);
 app.use(helmet({
   contentSecurityPolicy: {
     directives: {
-      defaultSrc:  ["'self'"],
-      styleSrc:    ["'self'", "'unsafe-inline'"],
-      scriptSrc:   ["'self'"],
-      imgSrc:      ["'self'", 'data:', 'https://res.cloudinary.com', 'https://*.vercel.app'],
-      connectSrc:  ["'self'", 'https://*.onrender.com', 'https://*.vercel.app'],
-      fontSrc:     ["'self'", 'data:'],
-      objectSrc:   ["'none'"],
-      frameAncestors: ["'none'"], // prevents clickjacking
+      defaultSrc: ["'self'"],
+      styleSrc:   ["'self'", "'unsafe-inline'"],
+      scriptSrc:  ["'self'"],
+      imgSrc:     ["'self'", 'data:'],
     },
   },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true,
-  },
-  noSniff: true,
-  xssFilter: true,
-  referrerPolicy: { policy: 'strict-origin-when-cross-origin' },
 }));
 
 // ─── CORS ──────────────────────────────────────────────────────────────────
@@ -84,12 +78,32 @@ app.options('*', cors());
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
 
-// ─── Session (in-memory — no Redis needed) ─────────────────────────────────
+// ─── Session — Redis-backed with in-memory fallback ────────────────────────
+// Redis: survives Render restarts, shared across instances.
+// Fallback: in-memory store for local dev (no Redis needed locally).
+let sessionStore;
+if (process.env.REDIS_URL) {
+  try {
+    const { createClient }  = require('redis');
+    const { RedisStore }    = require('connect-redis');
+    const redisClient = createClient({ url: process.env.REDIS_URL, socket: { tls: process.env.REDIS_URL.startsWith('rediss://') } });
+    redisClient.connect().catch(e => console.warn('[Redis] Connect warning:', e.message));
+    redisClient.on('error', e => console.warn('[Redis] Error:', e.message));
+    sessionStore = new RedisStore({ client: redisClient, prefix: 'finstat:sess:' });
+    console.log('[Session] Redis store active');
+  } catch (e) {
+    console.warn('[Session] Redis init failed, falling back to memory store:', e.message);
+  }
+} else {
+  console.log('[Session] No REDIS_URL — using in-memory store (not suitable for production multi-instance)');
+}
+
 app.use(session({
-  secret: process.env.SESSION_SECRET || 'finstatement-dev-secret',
-  resave: false,
+  store:             sessionStore, // undefined = default MemoryStore
+  secret:            process.env.SESSION_SECRET || 'finstatement-dev-secret',
+  resave:            false,
   saveUninitialized: false,
-  rolling: true,
+  rolling:           true,
   cookie: {
     httpOnly: true,
     secure:   process.env.NODE_ENV === 'production',
@@ -98,13 +112,21 @@ app.use(session({
   },
 }));
 
-// ─── Rate limiting ─────────────────────────────────────────────────────────
-// Strict rate limit on auth endpoints
-app.use('/api/auth/login',    rateLimit({ windowMs: 15 * 60 * 1000, max: 10,  message: { error: 'Too many login attempts. Try again in 15 minutes.' }, standardHeaders: true }));
-app.use('/api/auth/register', rateLimit({ windowMs: 60 * 60 * 1000, max: 5,   message: { error: 'Too many registration attempts.' }, standardHeaders: true }));
-app.use('/api/auth',          rateLimit({ windowMs: 15 * 60 * 1000, max: 50,  message: { error: 'Too many requests.' }, standardHeaders: true }));
-app.use('/api/upload',        rateLimit({ windowMs: 60 * 60 * 1000, max: 20,  message: { error: 'Too many file uploads.' }, standardHeaders: true }));
-app.use('/api',               rateLimit({ windowMs: 60 * 1000,      max: 300, message: { error: 'Too many requests.' }, standardHeaders: true }));
+// ─── Rate limiting — keyed by firmId for multi-tenant fairness ─────────────
+// Auth routes: IP-based (firmId not yet available before login)
+app.use('/api/auth', rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max:      30,
+  message:  'Too many auth attempts. Try again in 15 minutes.',
+}));
+
+// API routes: firmId-based so one firm cannot starve another
+app.use('/api', rateLimit({
+  windowMs: 60 * 1000,
+  max:      600,
+  keyGenerator: (req) => req.firmId || req.ip, // firmId set by authGuard
+  skip: (req) => req.method === 'OPTIONS',
+}));
 
 // ─── Audit logging ─────────────────────────────────────────────────────────
 app.use(auditMiddleware);
@@ -124,9 +146,6 @@ app.use('/api/report',      reportRoutes);
 app.use('/api/export',      exportRoutes);
 app.use('/api/schedules',   schedulesRoutes);
 app.use('/api/upload',      uploadRoutes);
-app.use('/api/preferences', preferencesRoutes);
-app.use('/api/otp',         otpRoutes);
-app.use('/api/auth',        oauthRoutes);
 
 // ─── 404 ───────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
@@ -144,6 +163,7 @@ app.use((err, _req, res, _next) => {
 app.listen(PORT, () => console.log(`[FinStatement API] Listening on port ${PORT}`));
 
 process.on('SIGTERM', async () => {
-  await prisma.$disconnect();
+  const { disconnectDB } = require('./src/config/db');
+  await disconnectDB();
   process.exit(0);
 });

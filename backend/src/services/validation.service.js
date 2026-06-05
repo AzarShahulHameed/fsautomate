@@ -1,16 +1,17 @@
 'use strict';
 const { prisma } = require('../config/db');
+const { getScheduleCastingErrors } = require('./schedule.service');
 
 async function runAllChecks(engagementId, tbVersionId) {
   const checks = [];
 
   // Load all data
   const [fsLines, noteGroups, noteDetails, tbVersion, mappings] = await Promise.all([
-    prisma.fSLine.findMany({ where: { engagementId } }),
+    prisma.fSLine.findMany({ where: { engagementId, isPriorYear: false } }),
     prisma.noteGroup.findMany({ where: { engagementId } }),
     prisma.noteDetail.findMany({ where: { engagementId } }),
     prisma.tBVersion.findFirst({
-      where: { engagementId },
+      where: { engagementId, isPriorYear: false },
       orderBy: { versionNumber: 'desc' },
       include: { rows: true },
     }),
@@ -292,6 +293,20 @@ async function runAllChecks(engagementId, tbVersionId) {
       message: `⚠ No revenue/income found in P&L. Verify that income items are mapped with 'Income' classification.`,
       detail: { plLineCount: plLines.length, totalIncome },
     });
+  }
+
+  // ── Schedule casting checks (PPE, Intangibles, Deferred Tax, EPS) ────────
+  try {
+    const scheduleCastingErrors = await getScheduleCastingErrors(engagementId);
+    for (const sc of scheduleCastingErrors) {
+      checks.push({
+        engagementId,
+        tbVersionId: tbVersionId || null,
+        ...sc,
+      });
+    }
+  } catch (e) {
+    console.warn('[Schedule casting check]', e.message);
   }
 
   // Save results via raw SQL to bypass enum type mismatch in DB

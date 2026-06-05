@@ -590,33 +590,66 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
   );
 }
 
-// ── CFS ───────────────────────────────────────────────────────────────────────
-function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, divisor, currSymbol, hasPY, pyBsLines, pyPlLines, cyDate, pyDate, locale = 'en-IN' }) {
-  const D          = divisor;
-  const incomeLines  = plLines.filter(l=>l.assetLiability==='Income');
+// ── CFS — Indirect method with proper working capital from PY/CY BS delta ─────
+// Working capital changes = (PY current asset/liability) - (CY current asset/liability)
+// This is the correct indirect method: uses actual BS movements, not estimates.
+function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, divisor, currSymbol, hasPY, cyDate, pyDate, locale = 'en-IN' }) {
+  const D       = divisor;
+  const isIFRS  = method==='IFRS'||method==='IFRS_SME';
+
+  // ── P&L line classification ────────────────────────────────────────────────
+  const incomeLines  = plLines.filter(l=>l.assetLiability==='Income'&&l.sheet==='PL');
   const expenseLines = plLines.filter(l=>l.assetLiability==='Expenses'&&l.sheet==='PL');
   const totalIncome  = incomeLines.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const totalExpense = expenseLines.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const pbt          = totalIncome - totalExpense;
-  const cash         = bsLines.filter(l=>['cash','bank'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
-  const depr         = expenseLines.filter(l=>['depreciation','amortis'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
-  const finCost      = expenseLines.filter(l=>['finance cost','interest expense','bank charge'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
-  const isIFRS       = method==='IFRS'||method==='IFRS_SME';
 
-  // PY cash = opening cash for CFS (prior year closing = current year opening)
-  const pyIncome  = hasPY ? incomeLines.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
-  const pyExpense = hasPY ? expenseLines.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
-  const pyPBT     = hasPY ? (pyIncome - pyExpense) : null;
+  const deprKW     = ['depreciation','amortis','amortiz'];
+  const finCostKW  = ['finance cost','interest expense','bank charge','borrowing cost'];
+  const cashKW     = ['cash','bank'];
+  const depr       = expenseLines.filter(l=>deprKW.some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+  const finCost    = expenseLines.filter(l=>finCostKW.some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+  const cash       = bsLines.filter(l=>cashKW.some(k=>l.groupName?.toLowerCase().includes(k))&&l.assetLiability==='Assets').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+
+  // ── Working capital changes (indirect method) ─────────────────────────────
+  // Formula: (PY balance - CY balance) for current assets, (CY balance - PY balance) for current liabilities
+  // Increase in CA = use of cash (negative); Decrease in CA = source of cash (positive)
+  // Increase in CL = source of cash (positive); Decrease in CL = use of cash (negative)
+  const currentAssetKW = ['inventor','stock','trade receivable','debtor','receivable','prepaid','advance to','other current asset','short term loan'];
+  const currentLiabKW  = ['trade payable','creditor','other current liab','accrued','advance from','short term provision','duties'];
+
+  let workingCapitalChanges  = 0;
+  const wcItems = [];
+
+  if (hasPY) {
+    for (const cyLine of bsLines) {
+      const n   = (cyLine.groupName||'').toLowerCase();
+      const cyAmt = Number(cyLine.totalFinalNet||0);
+      const pyAmt = Number(cyLine.pyAmount||0);
+
+      if (currentAssetKW.some(k=>n.includes(k)) && cyLine.assetLiability==='Assets') {
+        const change = pyAmt - cyAmt; // decrease in CA = positive cash flow
+        workingCapitalChanges += change;
+        if (Math.abs(change) > 0.01) wcItems.push({ label: `(Increase)/Decrease in ${cyLine.groupName}`, amount: change });
+      } else if (currentLiabKW.some(k=>n.includes(k)) && cyLine.assetLiability==='Liabilities') {
+        const change = cyAmt - pyAmt; // increase in CL = positive cash flow
+        workingCapitalChanges += change;
+        if (Math.abs(change) > 0.01) wcItems.push({ label: `Increase/(Decrease) in ${cyLine.groupName}`, amount: change });
+      }
+    }
+  }
+
+  const operatingCashBeforeTax = pbt + depr + finCost + workingCapitalChanges;
   const openingCash = hasPY
-    ? bsLines.filter(l=>['cash','bank'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.pyAmount||0),0)
+    ? bsLines.filter(l=>cashKW.some(k=>l.groupName?.toLowerCase().includes(k))&&l.assetLiability==='Assets').reduce((s,l)=>s+Number(l.pyAmount||0),0)
     : 0;
-  const pyDepr    = hasPY ? expenseLines.filter(l=>['depreciation','amortis'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
-  const pyFinCost = hasPY ? expenseLines.filter(l=>['finance cost','interest expense','bank charge'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
+  const netOperating = operatingCashBeforeTax;
+  const netChange    = netOperating - finCost;
 
-  const CRow = ({label, amount, bold, indent}) => (
-    <tr className={`${bold?'border-t-2 border-slate-500 bg-slate-50 font-bold':'border-b border-slate-100 hover:bg-blue-50'}`}>
-      <td className={`py-2 text-sm ${indent===2?'pl-10':indent?'pl-6':'pl-3'} ${bold?'font-bold text-slate-900':'text-slate-700'}`}>{label}</td>
-      <td className={`py-2 pr-3 text-right font-mono text-sm ${bold?'font-bold text-slate-900':'text-slate-800'}`}>{amount!==undefined?fmt(amount,D,locale):''}</td>
+  const CRow = ({label, amount, bold, indent, sub}) => (
+    <tr className={`${bold?'border-t-2 border-slate-500 bg-slate-50':'border-b border-slate-100 hover:bg-blue-50'}`}>
+      <td className={`py-2 text-sm ${indent===2?'pl-10':indent?'pl-6':'pl-3'} ${bold?'font-bold text-slate-900':sub?'text-slate-500 italic':'text-slate-700'}`}>{label}</td>
+      <td className={`py-2 pr-3 text-right font-mono text-sm ${bold?'font-bold text-slate-900':sub?'text-slate-500':'text-slate-800'}`}>{amount!==undefined&&amount!==null?fmt(amount,D,locale):''}</td>
     </tr>
   );
   const SH = ({label}) => <tr className="bg-slate-100"><td colSpan={2} className="px-3 py-2 font-bold text-slate-700 text-xs uppercase">{label}</td></tr>;
@@ -627,7 +660,7 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
         <h2 className="text-lg font-bold uppercase">{isIFRS?'Statement of Cash Flows':'Cash Flow Statement'}</h2>
         <p className="text-sm text-slate-500">for the year ended {cyDate}</p>
         <p className="text-xs text-slate-400">{isIFRS?'IAS 7':method==='IND_AS'?'Ind AS 7':'AS 3'}</p>
-        {hasPY && <p className="text-xs text-emerald-600 mt-1">✓ Opening cash from prior year TB</p>}
+        {hasPY && <p className="text-xs text-emerald-600 mt-1">✓ Working capital changes computed from BS movements</p>}
       </div>
       <div className="flex gap-3 mb-4 justify-center items-center">
         {['indirect','direct'].map(m=>(
@@ -642,36 +675,47 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
         <tbody>
           <SH label="A. Cash Flow from Operating Activities" />
           {cfsMethod==='indirect'?<>
-            <CRow label="Net Profit / (Loss) Before Tax" amount={pbt} indent />
+            <CRow label="Net Profit / (Loss) Before Tax and Finance Costs" amount={pbt} indent />
             <CRow label="Add: Depreciation and Amortisation" amount={depr} indent={2} />
             <CRow label="Add: Finance Costs" amount={finCost} indent={2} />
-            {hasPY
-              ? <CRow label="Working Capital Changes" amount={0} indent={2} />
-              : <CRow label="Working Capital Changes (Upload prior year TB for details)" amount={0} indent={2} />}
+            {hasPY ? <>
+              <tr className="bg-slate-50/60"><td colSpan={2} className="px-3 py-1.5 text-xs font-semibold text-slate-500 uppercase">Working Capital Changes</td></tr>
+              {wcItems.map((item,i)=><CRow key={i} label={item.label} amount={item.amount} indent={2} sub />)}
+              <CRow label="Total Working Capital Changes" amount={workingCapitalChanges} indent bold={false} />
+            </> : <CRow label="Working Capital Changes — upload prior year TB for details" amount={0} indent={2} sub />}
+            <CRow label="Cash Generated from Operations" amount={operatingCashBeforeTax} bold />
+            <CRow label="Less: Finance Costs Paid" amount={-finCost} indent />
           </>:<>
             <CRow label="Cash receipts from customers" amount={totalIncome} indent />
-            <CRow label="Cash paid to suppliers and employees" amount={-Math.abs(totalExpense)} indent />
+            <CRow label="Cash paid to suppliers and employees" amount={-Math.abs(totalExpense-depr-finCost)} indent />
           </>}
-          <CRow label="Net Cash from Operating Activities (A)" amount={pbt+depr} bold />
+          <CRow label="Net Cash from Operating Activities (A)" amount={netOperating - finCost} bold />
           <SH label="B. Cash Flow from Investing Activities" />
-          <CRow label="Purchase of Fixed Assets / Capital Expenditure" amount={0} indent />
+          <CRow label="Purchase of Property, Plant and Equipment" amount={0} indent />
           <CRow label="Net Cash from Investing Activities (B)" amount={0} bold />
           <SH label="C. Cash Flow from Financing Activities" />
           <CRow label="Proceeds from / (Repayment of) Borrowings" amount={0} indent />
           <CRow label="Finance Costs Paid" amount={-finCost} indent />
           <CRow label="Net Cash from Financing Activities (C)" amount={-finCost} bold />
           <tr className="border-t-2 border-slate-700 bg-slate-50">
-            <td className="px-3 py-3 font-bold text-slate-900 text-sm">Net Change in Cash (A+B+C)</td>
-            <td className="px-3 py-3 text-right font-mono font-bold">{fmt(pbt+depr-finCost,D,locale)}</td>
+            <td className="px-3 py-3 font-bold text-slate-900 text-sm">Net Change in Cash and Cash Equivalents (A+B+C)</td>
+            <td className="px-3 py-3 text-right font-mono font-bold">{fmt(netChange,D,locale)}</td>
           </tr>
-          <CRow label={hasPY ? 'Cash at Beginning of Year (from Prior Year BS)' : 'Cash at Beginning of Year'} amount={openingCash} indent />
+          <CRow label={hasPY?'Cash and Cash Equivalents at Beginning of Year':'Cash and Cash Equivalents at Beginning of Year'} amount={openingCash} indent />
           <tr className="border-t-2 border-slate-700 bg-indigo-50">
-            <td className="px-3 py-3 font-bold text-indigo-900 text-sm">Cash at End of Year (from Balance Sheet)</td>
+            <td className="px-3 py-3 font-bold text-indigo-900 text-sm">Cash and Cash Equivalents at End of Year</td>
             <td className="px-3 py-3 text-right font-mono font-bold text-indigo-900">{fmt(cash,D,locale)}</td>
           </tr>
+          {hasPY && Math.abs(cash - openingCash - netChange) > 1 && (
+            <tr className="bg-red-50">
+              <td className="px-3 py-2 text-xs text-red-600 italic" colSpan={2}>
+                ⚠ CFS closing cash ({fmt(openingCash+netChange,D,locale)}) differs from BS cash ({fmt(cash,D,locale)}) by {fmt(Math.abs(cash-openingCash-netChange),D,locale)} — check investing/financing activities
+              </td>
+            </tr>
+          )}
         </tbody>
       </table>
-      {!hasPY && <p className="text-xs text-slate-400 mt-2 italic">* Upload prior year TB for complete working capital changes and opening cash balance.</p>}
+      {!hasPY && <p className="text-xs text-slate-400 mt-2 italic">* Upload prior year TB to compute working capital changes and opening cash balance.</p>}
     </div>
   );
 }

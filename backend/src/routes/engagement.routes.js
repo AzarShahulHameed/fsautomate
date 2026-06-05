@@ -25,23 +25,9 @@ router.get('/client/:clientId', async (req, res, next) => {
 
 router.post('/', async (req, res, next) => {
   try {
-    // Support both { clientId, name, ... } and nested { clientId: { clientId, ... } }
-    let body = req.body;
-    // If clientId is an object (old API mismatch), extract from it
-    if (body.clientId && typeof body.clientId === 'object') {
-      body = { ...body.clientId, ...body };
-    }
-    const { clientId, name, method, financialYear, currency } = body;
-
-    if (!clientId || typeof clientId !== 'string') {
-      return res.status(400).json({ error: 'clientId is required and must be a string' });
-    }
-
-    const client = await prisma.$queryRawUnsafe(
-      `SELECT id FROM "Client" WHERE id=$1 AND "firmId"=$2 AND "isActive"=true LIMIT 1`,
-      clientId, req.firmId
-    );
-    if (!client.length) return res.status(404).json({ error: 'Client not found' });
+    const { clientId, name, method, financialYear, currency } = req.body;
+    const client = await prisma.client.findFirst({ where: { id: clientId, firmId: req.firmId } });
+    if (!client) return res.status(404).json({ error: 'Client not found' });
 
     const engagement = await prisma.engagement.create({
       data: { clientId, name, method, financialYear, currency: currency || 'INR' },
@@ -102,8 +88,6 @@ function getDefaultSections(engagementId, method) {
   return base;
 }
 
-module.exports = router;
-
 // GET /api/engagements/:engagementId/validation-checks
 const { getValidationResults } = require('../services/validation.service');
 router.get('/:engagementId/validation-checks', authGuard, engagementGuard, async (req, res, next) => {
@@ -126,33 +110,4 @@ router.post('/:engagementId/validation-checks', authGuard, engagementGuard, asyn
   } catch (err) { next(err); }
 });
 
-// PATCH update engagement
-router.patch('/:engagementId', engagementGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
-  try {
-    const { name, financialYear, method, currency, status } = req.body;
-    await prisma.$executeRawUnsafe(
-      `UPDATE "Engagement" SET
-        name=$1, "financialYear"=$2, method=$3::\"Method\", currency=$4, status=$5, "updatedAt"=NOW()
-       WHERE id=$6 AND "clientId" IN (SELECT id FROM "Client" WHERE "firmId"=$7)`,
-      name || req.engagement?.name,
-      financialYear || req.engagement?.financialYear,
-      method || req.engagement?.method,
-      currency || req.engagement?.currency,
-      status || req.engagement?.status,
-      req.params.engagementId, req.firmId
-    );
-    res.json({ saved: true });
-  } catch (err) { next(err); }
-});
-
-// DELETE engagement — soft delete
-router.delete('/:engagementId', engagementGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
-  try {
-    await prisma.$executeRawUnsafe(
-      `UPDATE "Engagement" SET "isActive"=false, "updatedAt"=NOW()
-       WHERE id=$1 AND "clientId" IN (SELECT id FROM "Client" WHERE "firmId"=$2)`,
-      req.params.engagementId, req.firmId
-    );
-    res.json({ deleted: true });
-  } catch (err) { next(err); }
-});
+module.exports = router;

@@ -27,14 +27,14 @@
 //     "Cash & Bank Balances" → matches "Cash and Bank" at ~0.60
 // ─────────────────────────────────────────────────────────────────────────────
 'use strict';
- 
+
 const { prisma } = require('../config/db');
- 
+
 const AUTO_APPLY_THRESHOLD  = 0.60; // confidence >= this → auto-map silently
 const SUGGEST_THRESHOLD     = 0.40; // confidence >= this → suggest but flag for review
- 
+
 // ── Text normalisation ────────────────────────────────────────────────────────
- 
+
 /**
  * Normalise a subGrouping string for storage and comparison.
  * Strips punctuation, lowercases, collapses spaces.
@@ -46,20 +46,20 @@ function normalize(text) {
     .replace(/\s+/g, ' ')            // collapse whitespace
     .trim();
 }
- 
+
 /**
  * Tokenise a normalised string into word set.
  * Removes common stop words that add noise to matching.
  */
 const STOP_WORDS = new Set(['and', 'or', 'the', 'of', 'in', 'at', 'to', 'for',
   'a', 'an', 'by', 'with', 'from', 'as', 'on', 'is', 'are', 'was', 'be']);
- 
+
 function tokenize(normalizedText) {
   return new Set(
     normalizedText.split(' ').filter(w => w.length > 1 && !STOP_WORDS.has(w))
   );
 }
- 
+
 /**
  * Jaccard similarity between two token sets.
  * Returns 0.0 to 1.0.
@@ -70,7 +70,7 @@ function jaccardSimilarity(setA, setB) {
   const union = new Set([...setA, ...setB]);
   return intersection.size / union.size;
 }
- 
+
 /**
  * Score a raw TB subGrouping against a memory entry's normalizedText.
  * Returns 0.0 to 1.0.
@@ -78,20 +78,20 @@ function jaccardSimilarity(setA, setB) {
 function scoreMatch(inputNormalized, memoryNormalized) {
   // Exact match → perfect score
   if (inputNormalized === memoryNormalized) return 1.0;
- 
+
   // One contains the other exactly → very high score
   if (inputNormalized.includes(memoryNormalized) || memoryNormalized.includes(inputNormalized)) {
     return 0.85;
   }
- 
+
   // Token overlap (Jaccard)
   const tokensA = tokenize(inputNormalized);
   const tokensB = tokenize(memoryNormalized);
   return jaccardSimilarity(tokensA, tokensB);
 }
- 
+
 // ── Memory read ───────────────────────────────────────────────────────────────
- 
+
 /**
  * Find the best memory match for a given subGrouping text.
  *
@@ -104,7 +104,7 @@ function scoreMatch(inputNormalized, memoryNormalized) {
  */
 async function findMemoryMatch(rawText, firmId, clientId, method) {
   const normalized = normalize(rawText);
- 
+
   // Load all memory entries for this firm + method in one query
   // (client-specific entries for this client + firm-wide entries)
   const candidates = await prisma.mappingMemory.findMany({
@@ -121,35 +121,35 @@ async function findMemoryMatch(rawText, firmId, clientId, method) {
       { lastConfirmedAt: 'desc' },
     ],
   });
- 
+
   if (candidates.length === 0) return { match: null, score: 0, source: null };
- 
+
   let bestMatch      = null;
   let bestScore      = 0;
   let bestSource     = null;
- 
+
   for (const entry of candidates) {
     const score = scoreMatch(normalized, entry.normalizedText);
     const source = entry.clientId ? 'client' : 'firm';
- 
+
     // Client-specific entries get a bonus multiplier (they outrank firm-wide at same score)
     const adjustedScore = source === 'client' ? score * 1.05 : score;
- 
+
     if (adjustedScore > bestScore) {
       bestScore  = adjustedScore;
       bestMatch  = entry;
       bestSource = source;
     }
   }
- 
+
   // Cap score back to 1.0 after client bonus
   const finalScore = Math.min(bestScore, 1.0);
- 
+
   return { match: bestMatch, score: finalScore, source: bestSource };
 }
- 
+
 // ── Memory write ──────────────────────────────────────────────────────────────
- 
+
 /**
  * Record a confirmed mapping into memory.
  * Called every time:
@@ -179,14 +179,14 @@ async function recordMemory({
 }) {
   const normalizedText = normalize(rawText);
   const now = new Date();
- 
+
   // Prisma upsert cannot handle null inside composite unique keys.
   // Use findFirst → update/create pattern instead.
   await upsertMemoryEntry({
     firmId, clientId, normalizedText, method, rawText,
     groupName, subGroupName, subGroupNo, noteGroupId, masterGroupingId, engagementId, now,
   });
- 
+
   // Also write a firm-wide entry (clientId = null) when saving a client-specific one
   if (clientId) {
     await upsertMemoryEntry({
@@ -195,40 +195,22 @@ async function recordMemory({
     });
   }
 }
- 
+
 /**
  * findFirst → update or create — safe alternative to upsert with nullable unique keys.
+ */
+/**
+ * Optimistic insert with conflict fallback — safe for concurrent requests.
+ * Pattern: try CREATE first; if unique violation, fall back to UPDATE.
+ * This avoids the findFirst→create race condition where two concurrent
+ * requests both see no existing row and both try to create.
  */
 async function upsertMemoryEntry({
   firmId, clientId, normalizedText, method, rawText,
   groupName, subGroupName, subGroupNo, noteGroupId, masterGroupingId, engagementId, now,
 }) {
-  const existing = await prisma.mappingMemory.findFirst({
-    where: {
-      firmId,
-      clientId:      clientId ?? null,
-      normalizedText,
-      method,
-    },
-  });
- 
-  if (existing) {
-    await prisma.mappingMemory.update({
-      where: { id: existing.id },
-      data: {
-        groupName,
-        subGroupName,
-        subGroupNo,
-        noteGroupId,
-        masterGroupingId,
-        rawText,
-        confirmCount:     { increment: 1 },
-        lastConfirmedAt:  now,
-        lastEngagementId: engagementId,
-        updatedAt:        now,
-      },
-    });
-  } else {
+  try {
+    // Optimistic path: try to create first
     await prisma.mappingMemory.create({
       data: {
         firmId,
@@ -246,11 +228,38 @@ async function upsertMemoryEntry({
         lastEngagementId: engagementId,
       },
     });
+  } catch (createErr) {
+    // Unique constraint violation (P2002) → record already exists, update it
+    if (createErr?.code === 'P2002') {
+      const existing = await prisma.mappingMemory.findFirst({
+        where: { firmId, clientId: clientId ?? null, normalizedText, method },
+      });
+      if (existing) {
+        await prisma.mappingMemory.update({
+          where: { id: existing.id },
+          data: {
+            groupName,
+            subGroupName,
+            subGroupNo,
+            noteGroupId,
+            masterGroupingId,
+            rawText,
+            confirmCount:     { increment: 1 },
+            lastConfirmedAt:  now,
+            lastEngagementId: engagementId,
+            updatedAt:        now,
+          },
+        });
+      }
+    } else {
+      // Unexpected error — rethrow
+      throw createErr;
+    }
   }
 }
- 
+
 // ── Bulk memory application ───────────────────────────────────────────────────
- 
+
 /**
  * Apply memory to a list of unmapped subGroupings.
  * Returns three buckets:
@@ -268,15 +277,15 @@ async function applyMemoryToUnmapped(subGroupings, firmId, clientId, method) {
   const autoMapped    = [];
   const suggested     = [];
   const stillUnmapped = [];
- 
+
   for (const sg of subGroupings) {
     const { match, score, source } = await findMemoryMatch(sg, firmId, clientId, method);
- 
+
     if (!match || score < SUGGEST_THRESHOLD) {
       stillUnmapped.push(sg);
       continue;
     }
- 
+
     const result = {
       subGrouping:     sg,
       groupName:       match.groupName,
@@ -288,19 +297,19 @@ async function applyMemoryToUnmapped(subGroupings, firmId, clientId, method) {
       source,          // 'client' | 'firm'
       confirmCount:    match.confirmCount,
     };
- 
+
     if (score >= AUTO_APPLY_THRESHOLD) {
       autoMapped.push(result);
     } else {
       suggested.push(result);
     }
   }
- 
+
   return { autoMapped, suggested, stillUnmapped };
 }
- 
+
 // ── Stats / introspection ─────────────────────────────────────────────────────
- 
+
 /**
  * Return memory stats for a firm — used in the UI to show learning progress.
  */
@@ -315,7 +324,7 @@ async function getMemoryStats(firmId, method) {
       select: { normalizedText: true, groupName: true, confirmCount: true, clientId: true },
     }),
   ]);
- 
+
   return {
     totalEntries:    total,
     firmWide:        total - clientSpecific,
@@ -324,7 +333,7 @@ async function getMemoryStats(firmId, method) {
     topEntries,
   };
 }
- 
+
 module.exports = {
   normalize,
   scoreMatch,
@@ -335,4 +344,3 @@ module.exports = {
   AUTO_APPLY_THRESHOLD,
   SUGGEST_THRESHOLD,
 };
- 

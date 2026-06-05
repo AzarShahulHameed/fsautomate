@@ -5,16 +5,26 @@ import { useStore } from '../store';
 import toast from 'react-hot-toast';
 
 const CHECK_META = {
-  TB_BALANCE:         { label: 'Trial Balance Check',           icon: '⚖️', desc: 'Sum of all TB finalNet must equal zero' },
-  UNMAPPED_ITEMS:     { label: 'Unmapped Items',                icon: '🗺️', desc: 'All TB sub-groupings must be mapped to FS heads' },
-  CROSS_CASTING_BS:   { label: 'Balance Sheet Cross Cast',      icon: '📊', desc: 'Assets = Equity + Liabilities' },
-  CROSS_CASTING_PL:   { label: 'P&L Summary',                  icon: '📈', desc: 'Revenue − Expenses = Net Profit' },
-  CASTING:            { label: 'Note Casting Check',            icon: '🔢', desc: 'Note detail totals must match FS line amounts' },
-  RECONCILIATION_RE:  { label: 'Retained Earnings Reconciliation', icon: '🔄', desc: 'Opening RE + Profit = Closing RE' },
-  RECONCILIATION_CASH:{ label: 'Cash Reconciliation',           icon: '💰', desc: 'BS Cash = CFS Closing Cash' },
-  COMPLETENESS:       { label: 'Completeness Check',            icon: '✅', desc: 'All BS lines have note references' },
-  SIGN_CHECK:         { label: 'Sign Convention Check',         icon: '±',  desc: 'Assets and Equity should be positive' },
-  UNMAPPED:           { label: 'Unmapped Warning',              icon: '⚠️', desc: 'Items excluded from FS' },
+  TB_BALANCE:              { label: 'Trial Balance Check',                   icon: '⚖️',  desc: 'Sum of all TB finalNet must equal zero' },
+  UNMAPPED_ITEMS:          { label: 'Unmapped Items',                        icon: '🗺️',  desc: 'All TB sub-groupings must be mapped to FS heads' },
+  CROSS_CASTING_BS:        { label: 'Balance Sheet Cross Cast',              icon: '📊',  desc: 'Assets = Equity + Liabilities' },
+  CROSS_CASTING_PL:        { label: 'P&L Summary',                          icon: '📈',  desc: 'Revenue − Expenses = Net Profit' },
+  CASTING:                 { label: 'Note Casting Check',                   icon: '🔢',  desc: 'Note detail totals must match FS line amounts' },
+  RECONCILIATION_RE:       { label: 'Retained Earnings Reconciliation',     icon: '🔄',  desc: 'Opening RE + Profit = Closing RE' },
+  RECONCILIATION_CASH:     { label: 'Cash Reconciliation',                  icon: '💰',  desc: 'BS Cash = CFS Closing Cash' },
+  COMPLETENESS:            { label: 'Completeness Check',                   icon: '✅',  desc: 'All BS lines have note references' },
+  SIGN_CHECK:              { label: 'Sign Convention Check',                icon: '±',   desc: 'Assets and Equity should be positive' },
+  UNMAPPED:                { label: 'Unmapped Warning',                     icon: '⚠️',  desc: 'Items excluded from FS' },
+  OCI_CHECK:               { label: 'OCI Compliance Check',                 icon: '📋',  desc: 'Other Comprehensive Income items per method' },
+  SCHEDULE_III:            { label: 'Schedule III Structure',                icon: '🏛️',  desc: 'Non-current / Current classification per Companies Act' },
+  IAS1_STRUCTURE:          { label: 'IAS 1 Structure Check',                icon: '🌐',  desc: 'Non-current / Current split per IAS 1' },
+  REVENUE_CHECK:           { label: 'Revenue Check',                        icon: '💵',  desc: 'Revenue must be present in P&L' },
+  // Schedule casting checks
+  SCHEDULE_PPE:            { label: 'PPE Schedule Reconciliation',          icon: '🏗️',  desc: 'PPE schedule closing net block must equal Balance Sheet PPE amount' },
+  SCHEDULE_INTANGIBLES:    { label: 'Intangibles Schedule Reconciliation',  icon: '💡',  desc: 'Intangibles schedule closing net block must equal Balance Sheet amount' },
+  SCHEDULE_DEPRECIATION:   { label: 'Depreciation Cross-Check',            icon: '📉',  desc: 'Depreciation in PPE/Intangibles schedule must equal P&L depreciation expense' },
+  SCHEDULE_DEFERRED_TAX:   { label: 'Deferred Tax Reconciliation',         icon: '🔄',  desc: 'Deferred tax working net balance must equal Balance Sheet DTA/DTL' },
+  SCHEDULE_EPS_PAT:        { label: 'EPS PAT Verification',                icon: '📈',  desc: 'EPS working PAT must match P&L computed profit after tax' },
 };
 
 const STATUS_CONFIG = {
@@ -181,6 +191,64 @@ function CheckCard({ check }) {
           )}
 
           {/* SIGN CHECK — detailed */}
+          {check.checkType === 'SCHEDULE_PPE' && detail.difference !== undefined && Math.abs(detail.difference) >= 1 && (
+            <div className="mt-3 grid grid-cols-3 gap-3">
+              {[
+                { label: 'Schedule Net Block', value: detail.scheduleClosingNet?.toFixed(2) },
+                { label: 'Balance Sheet PPE',  value: detail.fsAmount?.toFixed(2) },
+                { label: 'Difference',         value: detail.difference?.toFixed(2), highlight: true },
+              ].map(s => (
+                <div key={s.label} className={`rounded-lg p-3 ${s.highlight ? 'bg-red-900/30 border border-red-700' : 'bg-slate-800 border border-slate-700'}`}>
+                  <div className="text-xs text-slate-400">{s.label}</div>
+                  <div className="font-mono font-bold text-white mt-1">{s.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {check.checkType === 'SCHEDULE_DEFERRED_TAX' && detail.difference !== undefined && Math.abs(detail.difference) >= 1 && (
+            <div className="mt-3 grid grid-cols-4 gap-3">
+              {[
+                { label: 'Schedule Net DT',    value: detail.scheduleNetDT?.toFixed(2) },
+                { label: 'FS DTA',             value: detail.fsDTA?.toFixed(2) },
+                { label: 'FS DTL',             value: detail.fsDTL?.toFixed(2) },
+                { label: 'Difference',         value: detail.difference?.toFixed(2), highlight: true },
+              ].map(s => (
+                <div key={s.label} className={`rounded-lg p-3 ${s.highlight ? 'bg-red-900/30 border border-red-700' : 'bg-slate-800 border border-slate-700'}`}>
+                  <div className="text-xs text-slate-400">{s.label}</div>
+                  <div className="font-mono font-bold text-white mt-1">{s.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {check.checkType === 'SCHEDULE_EPS_PAT' && detail.difference !== undefined && (
+            <div className="mt-3 grid grid-cols-3 gap-3">
+              {[
+                { label: 'EPS Working PAT',    value: detail.epsPAT?.toFixed(2) },
+                { label: 'P&L Computed PAT',   value: detail.fsPAT?.toFixed(2) },
+                { label: 'Difference',         value: detail.difference?.toFixed(2), highlight: Math.abs(detail.difference) >= 1 },
+              ].map(s => (
+                <div key={s.label} className={`rounded-lg p-3 ${s.highlight ? 'bg-amber-900/30 border border-amber-700' : 'bg-slate-800 border border-slate-700'}`}>
+                  <div className="text-xs text-slate-400">{s.label}</div>
+                  <div className="font-mono font-bold text-white mt-1">{s.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
+          {check.checkType === 'SCHEDULE_DEPRECIATION' && detail.difference !== undefined && (
+            <div className="mt-3 grid grid-cols-4 gap-3">
+              {[
+                { label: 'PPE Depreciation',   value: detail.ppeDepr?.toFixed(2) },
+                { label: 'Intangible Amort.',  value: detail.intangDepr?.toFixed(2) },
+                { label: 'Total Schedule Depr',value: detail.totalScheduleDepr?.toFixed(2) },
+                { label: 'P&L Depr Expense',   value: detail.fsDepr?.toFixed(2) },
+              ].map(s => (
+                <div key={s.label} className="rounded-lg p-3 bg-slate-800 border border-slate-700">
+                  <div className="text-xs text-slate-400">{s.label}</div>
+                  <div className="font-mono font-bold text-white mt-1">{s.value}</div>
+                </div>
+              ))}
+            </div>
+          )}
           {check.checkType === 'SIGN_CHECK' && detail.items?.length > 0 && (
             <div className="mt-3 space-y-2">
               <p className="text-xs font-bold text-amber-400 uppercase tracking-wider mb-2">Sign Issues Found:</p>
@@ -223,6 +291,11 @@ function CheckCard({ check }) {
                 {check.checkType === 'CROSS_CASTING_BS' && 'Check Mapping page — some liability/equity items may be mapped as Assets. Fix the classification and re-generate FS.'}
                 {check.checkType === 'TB_BALANCE' && 'Your Trial Balance does not balance. Check the source TB file — debits must equal credits.'}
                 {check.checkType === 'COMPLETENESS' && 'In the Mapping page, add Note Group IDs to all mapped items.'}
+                {check.checkType === 'SCHEDULE_PPE' && 'Go to Schedules → PPE → adjust opening balance, additions, disposals or depreciation until closing net block matches the Balance Sheet.'}
+                {check.checkType === 'SCHEDULE_INTANGIBLES' && 'Go to Schedules → Intangible Assets → adjust movements until closing net block matches the Balance Sheet.'}
+                {check.checkType === 'SCHEDULE_DEPRECIATION' && 'Go to Schedules → PPE/Intangibles → ensure "Depreciation for Year" totals match the P&L depreciation expense line.'}
+                {check.checkType === 'SCHEDULE_DEFERRED_TAX' && 'Go to Schedules → Deferred Tax → adjust timing differences until net DTA/DTL matches the Balance Sheet.'}
+                {check.checkType === 'SCHEDULE_EPS_PAT' && 'Go to Schedules → EPS → click Save to refresh PAT from the latest generated Financial Statements.'}
               </p>
             </div>
           )}
