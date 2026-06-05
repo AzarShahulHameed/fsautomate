@@ -1,6 +1,6 @@
 // src/api/client.js
 import axios from 'axios';
-
+ 
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL
     ? `${import.meta.env.VITE_API_BASE_URL}/api`
@@ -8,7 +8,7 @@ const api = axios.create({
   withCredentials: true,
   timeout: 60000,
 });
-
+ 
 api.interceptors.request.use((config) => {
   try {
     const raw = localStorage.getItem('finstatement-auth');
@@ -21,7 +21,7 @@ api.interceptors.request.use((config) => {
   } catch (_) {}
   return config;
 });
-
+ 
 api.interceptors.response.use(
   (res) => res.data,
   (err) => {
@@ -32,9 +32,9 @@ api.interceptors.response.use(
     return Promise.reject(err?.response?.data || err);
   }
 );
-
+ 
 export default api;
-
+ 
 // ─── Auth API ─────────────────────────────────────────────────────────────────
 export const authAPI = {
   login:          (data) => api.post('/auth/login', data),
@@ -47,7 +47,7 @@ export const authAPI = {
   changePassword: (data) => api.patch('/auth/password', data),
   updateFirm:     (data) => api.patch('/auth/firm', data),
 };
-
+ 
 // ─── Client API ───────────────────────────────────────────────────────────────
 export const clientAPI = {
   list:   ()         => api.get('/clients'),
@@ -55,7 +55,7 @@ export const clientAPI = {
   create: (data)     => api.post('/clients', data),
   update: (id, data) => api.put(`/clients/${id}`, data),
 };
-
+ 
 // ─── Engagement API ───────────────────────────────────────────────────────────
 export const engagementAPI = {
   list:          (clientId) => api.get(`/engagements/client/${clientId}`),
@@ -65,7 +65,7 @@ export const engagementAPI = {
   validation:    (id)       => api.get(`/engagements/${id}/validation-checks`),
   runValidation: (id)       => api.post(`/engagements/${id}/validation-checks`),
 };
-
+ 
 // ─── Trial Balance API ────────────────────────────────────────────────────────
 export const tbAPI = {
   // isPriorYear: boolean — determines whether this is a CY or PY upload
@@ -86,7 +86,7 @@ export const tbAPI = {
   copyPriorYear:(eid, sourceEngagementId, label) =>
     api.post(`/tb/${eid}/copy-prior-year`, { sourceEngagementId, label }),
 };
-
+ 
 // ─── Mapping API ──────────────────────────────────────────────────────────────
 export const mappingAPI = {
   status:       (eid)              => api.get(`/mapping/${eid}/status`),
@@ -94,19 +94,19 @@ export const mappingAPI = {
   save:         (eid, data)        => api.put(`/mapping/${eid}/manual`, data),
   master:       (method, search)   => api.get(`/mapping/master`, { params: { method, search } }),
 };
-
+ 
 // ─── Financial Statements API ─────────────────────────────────────────────────
 export const fsAPI = {
   generate: (eid) => api.post(`/fs/${eid}/generate`),
   get:      (eid) => api.get(`/fs/${eid}`),
 };
-
+ 
 // ─── Notes API ────────────────────────────────────────────────────────────────
 export const notesAPI = {
   generate: (eid) => api.post(`/notes/${eid}/generate`),
   get:      (eid) => api.get(`/notes/${eid}`),
 };
-
+ 
 // ─── Report API ───────────────────────────────────────────────────────────────
 export const reportAPI = {
   sections:    (eid)            => api.get(`/report/${eid}/sections`),
@@ -114,10 +114,10 @@ export const reportAPI = {
   toggleVis:   (eid, sid, v)   => api.patch(`/report/${eid}/sections/${sid}/visibility`, { isVisible: v }),
   reorder:     (eid, order)    => api.patch(`/report/${eid}/sections/reorder`, { order }),
 };
-
+ 
 // ─── Export API (blob responses — bypass interceptor) ─────────────────────────
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
-
+ 
 function authHeader() {
   try {
     const raw = localStorage.getItem('finstatement-auth');
@@ -128,7 +128,7 @@ function authHeader() {
   } catch (_) {}
   return {};
 }
-
+ 
 // ─── Upload API ───────────────────────────────────────────────────────────────
 export const uploadAPI = {
   avatar: (file) => {
@@ -139,7 +139,7 @@ export const uploadAPI = {
     });
   },
 };
-
+ 
 export const exportAPI = {
   word:  (eid) => axios.get(
     `${BASE}/api/export/${eid}/word`,
@@ -149,7 +149,7 @@ export const exportAPI = {
     `${BASE}/api/export/${eid}/excel`,
     { responseType: 'blob', withCredentials: true, headers: authHeader() }
   ).then(r => r.data),
-
+ 
   // Download FS Groupings master as CSV
   fsGroupings: (method) => {
     const token = authHeader()['Authorization'];
@@ -162,3 +162,17 @@ export const exportAPI = {
     });
   },
 };
+ 
+// ─── Preferences API ──────────────────────────────────────────────────────────
+export const prefsAPI = {
+  get:    ()     => api.get('/preferences'),
+  save:   (data) => api.put('/preferences', data),
+  update: (data) => api.patch('/preferences', data),
+};
+ 
+// ─── OTP API ──────────────────────────────────────────────────────────────────
+export const otpAPI = {
+  send:   (data) => api.post('/otp/send', data),
+  verify: (data) => api.post('/otp/verify', data),
+};
+ 
