@@ -370,84 +370,87 @@ async function generateFS(engagementId, firmId) {
   const noteNumberMap      = assignNoteNumbers(method, uniqueNoteGroupIds);
  
   // ── Persist to DB ─────────────────────────────────────────────────────────
-  const result = await prisma.$transaction(async (tx) => {
-    await tx.noteDetail.deleteMany({ where: { engagementId } });
-    await tx.fSLine.deleteMany({ where: { engagementId } });
-    await tx.noteGroup.deleteMany({ where: { engagementId } });
+  // Use sequential prisma calls (not a long transaction) to avoid timeout.
+  // Delete old data first, then bulk-insert new data with createMany.
+  await prisma.noteDetail.deleteMany({ where: { engagementId } });
+  await prisma.fSLine.deleteMany({ where: { engagementId } });
+  await prisma.noteGroup.deleteMany({ where: { engagementId } });
  
-    let autoNum = 100;
-    const createdNGs = new Map();
+  // Create NoteGroups
+  let autoNum = 100;
+  const createdNGs = new Map();
+  for (const agg of sortedCYAggs) {
+    if (!agg.noteGroupId || createdNGs.has(agg.noteGroupId)) continue;
+    const noteNumber = noteNumberMap.get(agg.noteGroupId) || autoNum++;
+    const ng = await prisma.noteGroup.create({
+      data: { engagementId, noteGroupId: agg.noteGroupId, noteNumber, title: agg.groupName, isMandatory: false },
+    });
+    createdNGs.set(agg.noteGroupId, ng);
+  }
  
-    for (const agg of sortedCYAggs) {
-      if (!agg.noteGroupId || createdNGs.has(agg.noteGroupId)) continue;
-      const noteNumber = noteNumberMap.get(agg.noteGroupId) || autoNum++;
-      const ng = await tx.noteGroup.create({
-        data: { engagementId, noteGroupId: agg.noteGroupId, noteNumber, title: agg.groupName, isMandatory: false },
+  // Bulk-insert CY FSLines
+  let order = 0;
+  const cyLineRows = sortedCYAggs.map(agg => ({
+    engagementId,
+    tbVersionId:    latestCY.id,
+    sheet:          agg.sheet,
+    groupName:      agg.groupName,
+    totalFinalNet:  agg.totalFinalNet,
+    noteGroupId:    agg.noteGroupId || null,
+    displayOrder:   ++order,
+    assetLiability: agg.assetLiability,
+    isPriorYear:    false,
+  }));
+  await prisma.fSLine.createMany({ data: cyLineRows, skipDuplicates: true });
+ 
+  // Build fsLineData for return value (enrich with noteGroup)
+  const fsLineData = cyLineRows.map(line => ({
+    ...line,
+    id:          null, // not needed for return value
+    noteGroup:   line.noteGroupId ? (createdNGs.get(line.noteGroupId) || null) : null,
+    generatedAt: new Date(),
+  }));
+ 
+  // Bulk-insert PY FSLines
+  if (hasPY) {
+    let pyOrder = 0;
+    const pyLineRows = [];
+ 
+    for (const cyAgg of sortedCYAggs) {
+      const pyAgg = pyAggs.get(cyAgg.groupName);
+      pyLineRows.push({
+        engagementId,
+        tbVersionId:    latestPY.id,
+        sheet:          cyAgg.sheet,
+        groupName:      cyAgg.groupName,
+        totalFinalNet:  pyAgg ? pyAgg.totalFinalNet : 0,
+        noteGroupId:    cyAgg.noteGroupId || null,
+        displayOrder:   ++pyOrder,
+        assetLiability: cyAgg.assetLiability,
+        isPriorYear:    true,
       });
-      createdNGs.set(agg.noteGroupId, ng);
     }
- 
-    // Write CY FSLines
-    let order      = 0;
-    const fsLineData = [];
- 
-    for (const agg of sortedCYAggs) {
-      const line = await tx.fSLine.create({
-        data: {
-          engagementId,
-          tbVersionId:    latestCY.id,
-          sheet:          agg.sheet,
-          groupName:      agg.groupName,
-          totalFinalNet:  agg.totalFinalNet,
-          noteGroupId:    agg.noteGroupId || null,
-          displayOrder:   ++order,
-          assetLiability: agg.assetLiability,
-          isPriorYear:    false,
-        },
+    // PY-only groups
+    for (const [gn, pyAgg] of pyAggs) {
+      if (cyAggs.has(gn)) continue;
+      pyLineRows.push({
+        engagementId,
+        tbVersionId:    latestPY.id,
+        sheet:          pyAgg.sheet,
+        groupName:      pyAgg.groupName,
+        totalFinalNet:  pyAgg.totalFinalNet,
+        noteGroupId:    pyAgg.noteGroupId || null,
+        displayOrder:   ++order + 1000,
+        assetLiability: pyAgg.assetLiability,
+        isPriorYear:    true,
       });
-      fsLineData.push({ ...line, noteGroup: agg.noteGroupId ? (createdNGs.get(agg.noteGroupId) || null) : null });
     }
- 
-    // Write PY FSLines — matched by groupName to CY order
-    if (hasPY) {
-      let pyOrder = 0;
-      for (const cyAgg of sortedCYAggs) {
-        const pyAgg = pyAggs.get(cyAgg.groupName);
-        await tx.fSLine.create({
-          data: {
-            engagementId,
-            tbVersionId:    latestPY.id,
-            sheet:          cyAgg.sheet,
-            groupName:      cyAgg.groupName,
-            totalFinalNet:  pyAgg ? pyAgg.totalFinalNet : 0,
-            noteGroupId:    cyAgg.noteGroupId || null,
-            displayOrder:   ++pyOrder,
-            assetLiability: cyAgg.assetLiability,
-            isPriorYear:    true,
-          },
-        });
-      }
-      // PY-only groups (exist in PY but not CY)
-      for (const [gn, pyAgg] of pyAggs) {
-        if (cyAggs.has(gn)) continue;
-        await tx.fSLine.create({
-          data: {
-            engagementId,
-            tbVersionId:    latestPY.id,
-            sheet:          pyAgg.sheet,
-            groupName:      pyAgg.groupName,
-            totalFinalNet:  pyAgg.totalFinalNet,
-            noteGroupId:    pyAgg.noteGroupId || null,
-            displayOrder:   ++order + 1000,
-            assetLiability: pyAgg.assetLiability,
-            isPriorYear:    true,
-          },
-        });
-      }
+    if (pyLineRows.length > 0) {
+      await prisma.fSLine.createMany({ data: pyLineRows, skipDuplicates: true });
     }
+  }
  
-    return { sheets: groupBySheet(fsLineData), errors, unmappedCount: unmappedSGs.size, hasPY };
-  });
+  const result = { sheets: groupBySheet(fsLineData), errors, unmappedCount: unmappedSGs.size, hasPY };
  
   // NoteDetails (CY only)
   try {
