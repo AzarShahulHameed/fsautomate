@@ -3,7 +3,7 @@ import { useParams } from 'react-router-dom';
 import { fsAPI } from '../api/client';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
- 
+
 const UNITS = [
   { label: 'Actual',    value: 1        },
   { label: 'Hundreds',  value: 100      },
@@ -12,14 +12,14 @@ const UNITS = [
   { label: 'Millions',  value: 1000000  },
   { label: 'Crores',    value: 10000000 },
 ];
- 
+
 const METHOD_CONFIG = {
   AS:       { bsTitle: 'Balance Sheet',                     plTitle: 'Statement of Profit and Loss',      tabs: ['BS','PL','CFS'],             standard: 'Companies Act 2013 — Schedule III',   hasOCI: false },
   IND_AS:   { bsTitle: 'Balance Sheet',                     plTitle: 'Statement of Profit and Loss',      tabs: ['BS','PL','OCI','CFS','SOCE'], standard: 'Ind AS — Schedule III Division II',   hasOCI: true  },
   IFRS:     { bsTitle: 'Statement of Financial Position',   plTitle: 'Statement of Comprehensive Income', tabs: ['BS','PL','OCI','CFS','SOCE'], standard: 'IFRS — IAS 1',                       hasOCI: true  },
   IFRS_SME: { bsTitle: 'Statement of Financial Position',   plTitle: 'Statement of Comprehensive Income', tabs: ['BS','PL','CFS','SOCE'],       standard: 'IFRS for SMEs — Section 3',          hasOCI: false },
 };
- 
+
 // locale: 'en-IN' for India (1,00,000 format), 'en-US' for UAE (1,000,000 format)
 function fmt(n, divisor = 1, locale = 'en-IN') {
   const num = Number(n || 0) / divisor;
@@ -27,11 +27,11 @@ function fmt(n, divisor = 1, locale = 'en-IN') {
   const s   = Math.round(abs).toLocaleString(locale);
   return num < 0 ? `(${s})` : s;
 }
- 
+
 // ── Table Row — now with PY column ───────────────────────────────────────────
 function Row({ label, note, amount, pyAmount, hasPY, bold, indent, section, subheader, borderTop, divisor, locale, onHide, hideable }) {
   const [hovered, setHovered] = useState(false);
- 
+
   if (section) return (
     <tr className="bg-slate-100">
       <td colSpan={hasPY ? 5 : 4} className="px-3 py-2 font-bold text-slate-700 uppercase text-xs tracking-wide">{label}</td>
@@ -42,7 +42,7 @@ function Row({ label, note, amount, pyAmount, hasPY, bold, indent, section, subh
       <td colSpan={hasPY ? 5 : 4} className="px-3 py-1.5 font-semibold text-slate-600 text-xs">{label}</td>
     </tr>
   );
- 
+
   return (
     <tr className={`${borderTop ? 'border-t-2 border-slate-600' : ''} ${bold ? 'bg-slate-50' : 'border-b border-slate-100 hover:bg-blue-50'} transition-colors`}
       onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
@@ -64,7 +64,7 @@ function Row({ label, note, amount, pyAmount, hasPY, bold, indent, section, subh
     </tr>
   );
 }
- 
+
 // Header row for tables — shows CY and PY year labels
 function TableHeader({ hasPY, cyYear, pyYear, cyDate, pyDate, currSymbol, extraCols = 1 }) {
   return (
@@ -87,21 +87,21 @@ function TableHeader({ hasPY, cyYear, pyYear, cyDate, pyDate, currSymbol, extraC
     </tr>
   );
 }
- 
+
 // ── Balance Sheet ─────────────────────────────────────────────────────────────
 function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY, cyYear, pyYear, cyDate, pyDate, locale = 'en-IN' }) {
   const cfg    = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
   const D      = divisor;
   const isIFRS = method === 'IFRS' || method === 'IFRS_SME';
- 
+
   const vis    = lines.filter(l => !hidden[l.groupName]);
   const eq     = vis.filter(l => l.assetLiability === 'Equity');
   const liab   = vis.filter(l => l.assetLiability === 'Liabilities');
   const assets = vis.filter(l => l.assetLiability === 'Assets');
- 
+
   const isShortTerm = n => n.includes('short term') || n.includes('short-term');
   const isLongTerm  = n => (n.includes('long term') || n.includes('long-term')) && !isShortTerm(n);
- 
+
   const NCA_KEYWORDS = [
     'property, plant','property plant','plant and equipment','plant & equipment',
     'fixed asset','tangible asset','ppe','freehold','leasehold improvement',
@@ -129,7 +129,7 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
     'long term loans and advance','long-term loans and advance',
     'long term loan and advance','long-term loan and advance',
   ];
- 
+
   const CA_KEYWORDS = [
     'inventor','stock','raw material','work in progress','work-in-progress','wip stock',
     'finished good','packing material','stores and spare','consumable','merchandise',
@@ -152,21 +152,21 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
     'provision for bad debt','provision for doubtful debt',
     'export incentive receivable','subsidy receivable',
   ];
- 
+
   const ncAssets    = assets.filter(l => { const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return false; if(isLongTerm(n)) return true; if(NCA_KEYWORDS.some(k=>n.includes(k))) return true; if(n.includes('investment')&&!n.includes('current invest')&&!n.includes('short term invest')&&!n.includes('short-term invest')&&!isShortTerm(n)) return true; return false; });
   const cAssets     = assets.filter(l => { const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return true; if(isLongTerm(n)) return false; if(NCA_KEYWORDS.some(k=>n.includes(k))) return false; if(n.includes('investment')&&!n.includes('current invest')&&!n.includes('short term invest')&&!n.includes('short-term invest')&&!isShortTerm(n)) return false; return CA_KEYWORDS.some(k=>n.includes(k)); });
   const otherAssets = assets.filter(l => { const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return false; if(isLongTerm(n)) return false; if(NCA_KEYWORDS.some(k=>n.includes(k))) return false; if(CA_KEYWORDS.some(k=>n.includes(k))) return false; if(n.includes('investment')&&!n.includes('current invest')&&!isShortTerm(n)) return false; return true; });
- 
+
   const NCL_KEYWORDS = ['long term borrowing','long-term borrowing','non-current borrowing','term loan','debenture','bond','note payable long','loan from bank','loan from financial institution','loan from nbfc','foreign currency loan','ecb','external commercial borrowing','lease liabilit','finance lease','right-of-use liab','provision for gratuity','gratuity liabilit','pension liabilit','post employment benefit','defined benefit','employee benefit liabilit','compensated absence','leave encashment liabilit','deferred tax liabilit','deferred tax liab','other non-current liabilit','other long term liabilit','non-current liabilit','security deposit received','deferred revenue long','deferred income long','loan from related party long','loan from director long'];
   const CL_KEYWORDS  = ['trade payable','trade and other payable','account payable','sundry creditor','creditor','bill payable','note payable','short term borrowing','short-term borrowing','working capital loan','cash credit','bank overdraft','overdraft','packing credit','loan repayable','current maturit','installment due','other payable','other current liabilit','accrued expense','accrual','statutory due','statutory liabilit','advance from customer','advance received','customer deposit','deferred revenue','deferred income','unclaimed dividend','unpaid dividend','dividend payable','vat payable','gst payable','tax payable','income tax payable','tds payable','service tax payable','duties and tax','provision for tax','provision for income tax','salary payable','wages payable','employee payable','pf payable','esic payable','pt payable','directors loan','director loan','due to director','loan from shareholder','shareholder loan','due to related','due to subsidiary','due to associate','short term provision','provision for expense','provision for audit','provision for warranty','proposed dividend'];
- 
+
   const ncLiab    = liab.filter(l=>{ const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return false; if(isLongTerm(n)) return true; return NCL_KEYWORDS.some(k=>n.includes(k)); });
   const cLiab     = liab.filter(l=>{ const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return true; if(isLongTerm(n)) return false; if(NCL_KEYWORDS.some(k=>n.includes(k))) return false; return CL_KEYWORDS.some(k=>n.includes(k)); });
   const otherLiab = liab.filter(l=>{ const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return false; if(isLongTerm(n)) return false; if(NCL_KEYWORDS.some(k=>n.includes(k))) return false; if(CL_KEYWORDS.some(k=>n.includes(k))) return false; return true; });
- 
+
   const sumCY = arr => arr.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const sumPY = arr => arr.reduce((s,l)=>s+Number(l.pyAmount||0),0);
- 
+
   const totalNCA    = [...ncAssets,...otherAssets].reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const totalCA     = cAssets.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const totalAssets = totalNCA + totalCA;
@@ -175,7 +175,7 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
   const totalCL     = [...cLiab,...otherLiab].reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const totalLiab   = totalNCL + totalCL;
   const totalEqLiab = totalEq + totalLiab;
- 
+
   const pyTotalNCA    = hasPY ? [...ncAssets,...otherAssets].reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const pyTotalCA     = hasPY ? cAssets.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const pyTotalAssets = hasPY ? (pyTotalNCA + pyTotalCA) : null;
@@ -184,22 +184,22 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
   const pyTotalCL     = hasPY ? [...cLiab,...otherLiab].reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const pyTotalLiab   = hasPY ? (pyTotalNCL + pyTotalCL) : null;
   const pyTotalEqLiab = hasPY ? (pyTotalEq + pyTotalLiab) : null;
- 
+
   const diff = totalAssets - totalEqLiab;
- 
+
   const R = ({ label, note, amount, pyAmt, bold, indent, section, subheader, borderTop, hideable, hideKey }) => (
     <Row label={label} note={note} amount={amount} pyAmount={pyAmt} hasPY={hasPY}
       bold={bold} indent={indent} section={section} subheader={subheader}
       borderTop={borderTop} divisor={D} locale={locale} hideable={hideable}
       onHide={hideKey ? () => onHide(hideKey) : undefined} />
   );
- 
+
   const Lines = ({ arr }) => arr.map((l,i) => (
     <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber}
       amount={Number(l.totalFinalNet)} pyAmt={hasPY ? Number(l.pyAmount??0) : null}
       indent={2} hideable hideKey={l.groupName} />
   ));
- 
+
   const renderIFRS = () => (<>
     <R label="ASSETS" section />
     <R label="Non-Current Assets" subheader />
@@ -223,7 +223,7 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
     <R label="Total Current Liabilities" amount={totalCL} pyAmt={pyTotalCL} bold borderTop />
     <R label="TOTAL EQUITY AND LIABILITIES" amount={totalEqLiab} pyAmt={pyTotalEqLiab} bold borderTop />
   </>);
- 
+
   const renderIndian = () => (<>
     <R label="I. EQUITY AND LIABILITIES" section />
     <R label="(1) Shareholders' Funds / Equity" subheader />
@@ -247,7 +247,7 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
     <R label="Total Current Assets" amount={totalCA} pyAmt={pyTotalCA} bold borderTop />
     <R label="TOTAL — ASSETS" amount={totalAssets} pyAmt={pyTotalAssets} bold borderTop />
   </>);
- 
+
   return (
     <div>
       <div className="text-center mb-5">
@@ -268,63 +268,129 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
     </div>
   );
 }
- 
+
 // ── Profit & Loss ─────────────────────────────────────────────────────────────
+// Renders in the correct format for each method:
+//   AS / Ind AS : Schedule III — Revenue → Other Income → Total Income →
+//                 Expenses by nature (all listed) → PBT → Tax → PAT
+//                 NO gross profit line.
+//   IFRS / IFRS SME : Function-based — Revenue → COS → Gross Profit →
+//                 Distribution → Admin → Other Income → Opex → Finance → PBT → Tax → PAT → OCI
 function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear, cyDate, pyDate, locale = 'en-IN' }) {
-  const cfg    = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
-  const D      = divisor;
-  const isIFRS = method === 'IFRS' || method === 'IFRS_SME';
- 
+  const cfg     = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
+  const D       = divisor;
+  const isIFRS  = method === 'IFRS' || method === 'IFRS_SME';
+  const isAS    = method === 'AS';
+  const isIndAS = method === 'IND_AS';
+
   const plLines  = lines.filter(l => l.sheet === 'PL');
   const ociLines = lines.filter(l => l.sheet === 'OCI');
- 
+
   const isIncome  = l => l.assetLiability === 'Income';
   const isExpense = l => l.assetLiability === 'Expenses';
- 
-  const revenueLines     = plLines.filter(l => isIncome(l) && ['revenue from operations','revenue from contracts','revenue','turnover','sales'].some(k=>l.groupName?.toLowerCase().includes(k)));
-  const otherIncomeLines = plLines.filter(l => isIncome(l) && !['revenue from operations','revenue from contracts','revenue','turnover','sales'].some(k=>l.groupName?.toLowerCase().includes(k)));
-  const cosLines         = plLines.filter(l => isExpense(l) && (() => { const n=l.groupName?.toLowerCase()||''; return n.includes('cost of sale')||n.includes('cost of good')||n.includes('cost of material')||n.includes('cost of revenue')||n.includes('cost of service')||n.includes('direct cost')||n.includes('purchase of stock')||n.includes('changes in inventor')||n.includes('material consumed')||n.includes('subcontract')||n.includes('job work')||n.includes('labour cost')||n.includes('labor cost')||n==='purchases'||n==='purchase'; })());
-  const finCostLines     = plLines.filter(l => isExpense(l) && ['finance cost','interest expense','bank charge','bank interest','borrowing cost'].some(k=>l.groupName?.toLowerCase().includes(k)));
-  const deprLines        = plLines.filter(l => isExpense(l) && ['depreciation','amortis','amortiz'].some(k=>l.groupName?.toLowerCase().includes(k)));
-  const taxLines         = plLines.filter(l => isExpense(l) && ['tax expense','income tax expense','current tax','deferred tax expense'].some(k=>l.groupName?.toLowerCase().includes(k)));
-  const sellingLines     = plLines.filter(l => isExpense(l) && ['selling','distribution','marketing','advertising'].some(k=>l.groupName?.toLowerCase().includes(k)) && !taxLines.includes(l) && !finCostLines.includes(l) && !cosLines.includes(l));
-  const adminLines       = plLines.filter(l => isExpense(l) && !cosLines.includes(l) && !finCostLines.includes(l) && !deprLines.includes(l) && !taxLines.includes(l) && !sellingLines.includes(l));
- 
+
+  // ── Revenue classification ────────────────────────────────────────────────
+  const revenueKW      = ['revenue from operations','revenue from contracts','revenue from contract',
+                          'turnover','sales','income from operations'];
+  const revenueLines   = plLines.filter(l => isIncome(l) && revenueKW.some(k=>l.groupName?.toLowerCase().includes(k)));
+  const otherIncomeLines = plLines.filter(l => isIncome(l) && !revenueKW.some(k=>l.groupName?.toLowerCase().includes(k)));
+
+  // ── Expense classification ────────────────────────────────────────────────
+  const cosKW      = ['cost of sale','cost of good','cost of material','cost of revenue',
+                      'cost of service','direct cost','purchase of stock','changes in inventor',
+                      'material consumed','subcontract','job work','labour cost','labor cost'];
+  const cosLines   = plLines.filter(l => isExpense(l) && (() => {
+    const n = l.groupName?.toLowerCase()||'';
+    return cosKW.some(k=>n.includes(k)) || n==='purchases' || n==='purchase';
+  })());
+
+  const finCostKW    = ['finance cost','interest expense','bank charge','bank interest','borrowing cost','finance charges'];
+  const finCostLines = plLines.filter(l => isExpense(l) && finCostKW.some(k=>l.groupName?.toLowerCase().includes(k)));
+
+  const deprKW    = ['depreciation','amortis','amortiz'];
+  const deprLines = plLines.filter(l => isExpense(l) && deprKW.some(k=>l.groupName?.toLowerCase().includes(k)));
+
+  const taxKW    = ['tax expense','income tax expense','current tax','deferred tax expense','provision for tax','tax expense:'];
+  const taxLines = plLines.filter(l => isExpense(l) && taxKW.some(k=>l.groupName?.toLowerCase().includes(k)));
+
+  const exceptKW    = ['exceptional'];
+  const exceptLines = plLines.filter(l => isExpense(l) && exceptKW.some(k=>l.groupName?.toLowerCase().includes(k)));
+
+  // AS/Ind AS: all non-cos, non-finance, non-depr, non-tax expenses are "other expenses by nature"
+  // IFRS: split into selling/admin
+  const sellingKW    = ['selling','distribution','marketing','advertising'];
+  const sellingLines = plLines.filter(l => isExpense(l)
+    && sellingKW.some(k=>l.groupName?.toLowerCase().includes(k))
+    && !cosLines.includes(l) && !taxLines.includes(l) && !finCostLines.includes(l));
+
+  // Everything else = employee costs + other expenses (for AS: all by nature)
+  const otherExpLines = plLines.filter(l => isExpense(l)
+    && !cosLines.includes(l) && !finCostLines.includes(l) && !deprLines.includes(l)
+    && !taxLines.includes(l) && !sellingLines.includes(l) && !exceptLines.includes(l));
+
+  // ── Compute totals ────────────────────────────────────────────────────────
   const sum   = arr => arr.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const sumPY = arr => hasPY ? arr.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
- 
-  const totalRevenue     = sum(revenueLines);
-  const totalOtherIncome = sum(otherIncomeLines);
-  const totalCOS         = sum(cosLines);
-  const grossProfit      = totalRevenue - totalCOS;
-  const totalSelling     = sum(sellingLines);
-  const totalAdmin       = sum(adminLines);
-  const totalDepr        = sum(deprLines);
-  const totalOpex        = totalSelling + totalAdmin + totalDepr;
-  const operatingProfit  = grossProfit + totalOtherIncome - totalOpex;
-  const totalFinCost     = sum(finCostLines);
-  const pbt              = operatingProfit - totalFinCost;
-  const totalTax         = sum(taxLines);
-  const pat              = pbt - totalTax;
-  const ociTotal         = sum(ociLines);
-  const totalCI          = pat + ociTotal;
- 
-  const pyRevenue     = sumPY(revenueLines);
-  const pyOtherIncome = sumPY(otherIncomeLines);
-  const pyCOS         = sumPY(cosLines);
-  const pyGross       = hasPY ? (pyRevenue - pyCOS) : null;
-  const pySelling     = sumPY(sellingLines);
-  const pyAdmin       = sumPY(adminLines);
-  const pyDepr        = sumPY(deprLines);
-  const pyOpex        = hasPY ? (pySelling + pyAdmin + pyDepr) : null;
-  const pyOpProfit    = hasPY ? (pyGross + pyOtherIncome - pyOpex) : null;
-  const pyFinCost     = sumPY(finCostLines);
-  const pyPBT         = hasPY ? (pyOpProfit - pyFinCost) : null;
-  const pyTax         = sumPY(taxLines);
-  const pyPAT         = hasPY ? (pyPBT - pyTax) : null;
-  const pyOCI         = sumPY(ociLines);
-  const pyCI          = hasPY ? (pyPAT + pyOCI) : null;
- 
+
+  const totalRevenue      = sum(revenueLines);
+  const totalOtherIncome  = sum(otherIncomeLines);
+  const totalCOS          = sum(cosLines);
+  const grossProfit       = totalRevenue - totalCOS;
+  const totalSelling      = sum(sellingLines);
+  const totalOtherExp     = sum(otherExpLines);
+  const totalDepr         = sum(deprLines);
+  const totalFinCost      = sum(finCostLines);
+  const totalExcept       = sum(exceptLines);
+  const totalTax          = sum(taxLines);
+
+  // AS/Ind AS: Total Expenses = all expense lines except tax
+  const totalExpenses = totalCOS + totalSelling + totalOtherExp + totalDepr + totalFinCost + totalExcept;
+  // Total income for AS
+  const totalIncome   = totalRevenue + totalOtherIncome;
+
+  // PBT computation differs by method
+  // AS/Ind AS: Total Income - Total Expenses (before tax)
+  // IFRS: Gross Profit + OtherIncome - Selling - OtherExp - Depr - FinCost
+  const pbt = isIFRS
+    ? grossProfit + totalOtherIncome - totalSelling - totalOtherExp - totalDepr - totalFinCost + totalExcept
+    : totalIncome - (totalExpenses - totalTax); // totalExpenses already excludes tax? No — recalc cleanly:
+  // Recalc cleanly for both:
+  const allExpensesBeforeTax = totalCOS + totalSelling + totalOtherExp + totalDepr + totalFinCost + totalExcept;
+  const pbtClean = totalIncome - allExpensesBeforeTax;
+  const pat      = pbtClean - totalTax;
+  const ociTotal = sum(ociLines);
+  const totalCI  = pat + ociTotal;
+
+  // PY
+  const pyRevenue      = sumPY(revenueLines);
+  const pyOtherIncome  = sumPY(otherIncomeLines);
+  const pyCOS          = sumPY(cosLines);
+  const pyGross        = hasPY ? (pyRevenue - pyCOS) : null;
+  const pySelling      = sumPY(sellingLines);
+  const pyOtherExp     = sumPY(otherExpLines);
+  const pyDepr         = sumPY(deprLines);
+  const pyFinCost      = sumPY(finCostLines);
+  const pyExcept       = sumPY(exceptLines);
+  const pyTax          = sumPY(taxLines);
+  const pyTotalIncome  = hasPY ? (pyRevenue + pyOtherIncome) : null;
+  const pyAllExpBT     = hasPY ? (pyCOS + pySelling + pyOtherExp + pyDepr + pyFinCost + pyExcept) : null;
+  const pyPBT          = hasPY ? (pyTotalIncome - pyAllExpBT) : null;
+  const pyPAT          = hasPY ? (pyPBT - pyTax) : null;
+  const pyOCI          = sumPY(ociLines);
+  const pyCI           = hasPY ? (pyPAT + pyOCI) : null;
+
+  // ── Dynamic profit/loss label helper ─────────────────────────────────────
+  function plLabel(amount, pyAmt, positiveWord, negativeWord) {
+    // Use current year amount to decide wording; if zero use positive word
+    const word = amount < 0 ? negativeWord : positiveWord;
+    return word;
+  }
+
+  const grossLabel  = plLabel(grossProfit,   pyGross,  'GROSS PROFIT',    'GROSS LOSS');
+  const patLabel    = plLabel(pat,            pyPAT,    'PROFIT FOR THE YEAR', 'LOSS FOR THE YEAR');
+  const pbtLabel    = plLabel(pbtClean,       pyPBT,    'PROFIT BEFORE TAX',   'LOSS BEFORE TAX');
+  const ciLabel     = plLabel(totalCI,        pyCI,     'TOTAL COMPREHENSIVE INCOME FOR THE YEAR', 'TOTAL COMPREHENSIVE LOSS FOR THE YEAR');
+
   const Blank = () => <tr><td colSpan={hasPY ? 5 : 4} className="py-1.5 border-0"></td></tr>;
   const R = ({label, note, amount, pyAmt, bold, indent, section, subheader, borderTop}) => (
     <Row label={label} note={note} amount={amount} pyAmount={pyAmt} hasPY={hasPY}
@@ -334,7 +400,164 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
     <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber}
       amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2} />
   ));
- 
+
+  // ── AS / Ind AS format — Schedule III ─────────────────────────────────────
+  // I. Revenue from Operations
+  // II. Other Income
+  // III. Total Revenue (I + II)
+  // IV. Expenses (all by nature, including finance costs and depreciation)
+  //     - Cost of materials / purchases / changes in inventory
+  //     - Employee benefit expenses
+  //     - Finance costs
+  //     - Depreciation and amortisation
+  //     - Other expenses
+  //     Total Expenses
+  // V.  Profit/(Loss) before exceptional items and tax (III - IV)
+  // VI. Exceptional items
+  // VII. Profit/(Loss) before tax (V + VI)
+  // VIII. Tax expense
+  // IX.  Profit/(Loss) for the year (VII - VIII)
+  const renderAS = () => (
+    <>
+      <R label="I. REVENUE FROM OPERATIONS" section />
+      <Lines arr={revenueLines} />
+      <R label="Total Revenue from Operations (I)" amount={totalRevenue} pyAmt={pyRevenue} bold borderTop />
+      <Blank/>
+      {otherIncomeLines.length > 0 && <>
+        <R label="II. OTHER INCOME" section />
+        <Lines arr={otherIncomeLines} />
+        <R label="Total Other Income (II)" amount={totalOtherIncome} pyAmt={pyOtherIncome} bold borderTop />
+        <Blank/>
+      </>}
+      <R label={`III. TOTAL REVENUE ${otherIncomeLines.length>0?'(I + II)':'(I)'}`} amount={totalIncome} pyAmt={pyTotalIncome} bold borderTop />
+      <Blank/>
+      <R label="IV. EXPENSES" section />
+      {cosLines.length > 0 && <><Lines arr={cosLines}/></>}
+      {otherExpLines.length > 0 && <><Lines arr={otherExpLines}/></>}
+      {deprLines.length > 0 && <><Lines arr={deprLines}/></>}
+      {finCostLines.length > 0 && <><Lines arr={finCostLines}/></>}
+      <R label="Total Expenses (IV)" amount={allExpensesBeforeTax} pyAmt={pyAllExpBT} bold borderTop />
+      <Blank/>
+      {exceptLines.length > 0 ? <>
+        <R label={`V. ${plLabel(totalIncome - allExpensesBeforeTax, null, 'PROFIT', 'LOSS')} BEFORE EXCEPTIONAL ITEMS AND TAX (III - IV)`} amount={totalIncome - allExpensesBeforeTax} pyAmt={hasPY?(pyTotalIncome-pyAllExpBT):null} bold borderTop />
+        <Blank/>
+        <R label="VI. EXCEPTIONAL ITEMS" section />
+        <Lines arr={exceptLines} />
+        <R label={`VII. ${pbtLabel} (V + VI)`} amount={pbtClean} pyAmt={pyPBT} bold borderTop />
+      </> : <>
+        <R label={`V. ${pbtLabel} (III - IV)`} amount={pbtClean} pyAmt={pyPBT} bold borderTop />
+      </>}
+      <Blank/>
+      <R label={`${exceptLines.length>0?'VIII':'VI'}. TAX EXPENSE`} section />
+      {taxLines.length > 0
+        ? <Lines arr={taxLines}/>
+        : <R label="Current tax" amount={0} pyAmt={hasPY?0:null} indent={2}/>}
+      <Blank/>
+      <R label={`${exceptLines.length>0?'IX':'VII'}. ${patLabel}`} amount={pat} pyAmt={pyPAT} bold borderTop />
+      {cfg.hasOCI && <>
+        <Blank/>
+        <R label="OTHER COMPREHENSIVE INCOME" section />
+        <R label="A. Items that will not be reclassified to profit or loss" subheader />
+        {ociLines.filter(l=>['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
+          <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2}/>
+        ))}
+        <R label="B. Items that will be reclassified to profit or loss" subheader />
+        {ociLines.filter(l=>!['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
+          <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2}/>
+        ))}
+        {ociLines.length===0 && <tr><td colSpan={hasPY?5:4} className="px-10 py-1.5 text-xs text-slate-400 italic">No OCI items — map to OCI sheet in Mapping page if applicable</td></tr>}
+        <R label="Total Other Comprehensive Income / (Loss) for the year, net of tax" amount={ociTotal} pyAmt={pyOCI} bold borderTop />
+        <Blank/>
+        <R label={ciLabel} amount={totalCI} pyAmt={pyCI} bold borderTop />
+      </>}
+      <Blank/>
+      <R label="Earnings Per Share (see Note)" bold />
+      <R label="Basic EPS (₹)" amount={null} indent={2} />
+      <R label="Diluted EPS (₹)" amount={null} indent={2} />
+    </>
+  );
+
+  // ── IFRS / IFRS SME format — function-based ────────────────────────────────
+  // Revenue → Cost of Sales → Gross Profit → Distribution Costs →
+  // Admin Expenses → Other Income → Operating Profit →
+  // Finance Costs → PBT → Tax → PAT → OCI → Total CI
+  const renderIFRS = () => (
+    <>
+      <R label="REVENUE" section />
+      <Lines arr={revenueLines} />
+      <R label="Revenue" amount={totalRevenue} pyAmt={pyRevenue} bold borderTop />
+      <Blank/>
+      {cosLines.length > 0 && <>
+        <R label="Cost of sales" subheader />
+        <Lines arr={cosLines} />
+        <R label="Total cost of sales" amount={totalCOS} pyAmt={pyCOS} bold borderTop />
+        <Blank/>
+        <R label={grossLabel} amount={grossProfit} pyAmt={pyGross} bold borderTop />
+        <Blank/>
+      </>}
+      {sellingLines.length > 0 && <>
+        <R label="Distribution costs" subheader />
+        <Lines arr={sellingLines} />
+        <Blank/>
+      </>}
+      {otherExpLines.length > 0 && <>
+        <R label="Administrative and other expenses" subheader />
+        <Lines arr={otherExpLines} />
+        <Blank/>
+      </>}
+      {deprLines.length > 0 && <>
+        <R label="Depreciation and amortisation" subheader />
+        <Lines arr={deprLines} />
+        <Blank/>
+      </>}
+      {otherIncomeLines.length > 0 && <>
+        <R label="Other income" subheader />
+        <Lines arr={otherIncomeLines} />
+        <Blank/>
+      </>}
+      {exceptLines.length > 0 && <>
+        <R label="Exceptional items" subheader />
+        <Lines arr={exceptLines} />
+        <Blank/>
+      </>}
+      <R label={pbtLabel.replace('BEFORE TAX','BEFORE FINANCE COSTS AND TAX')} amount={pbtClean + totalFinCost} pyAmt={hasPY?(pyPBT+pyFinCost):null} bold borderTop />
+      <Blank/>
+      <R label="Finance costs" subheader />
+      {finCostLines.length > 0
+        ? <Lines arr={finCostLines}/>
+        : <R label="Finance costs" amount={0} pyAmt={hasPY?0:null} indent={2}/>}
+      <Blank/>
+      <R label={pbtLabel} amount={pbtClean} pyAmt={pyPBT} bold borderTop />
+      <Blank/>
+      <R label="Income tax expense" subheader />
+      {taxLines.length > 0
+        ? <Lines arr={taxLines}/>
+        : <R label="Current tax" amount={0} pyAmt={hasPY?0:null} indent={2}/>}
+      <Blank/>
+      <R label={patLabel} amount={pat} pyAmt={pyPAT} bold borderTop />
+      {cfg.hasOCI && <>
+        <Blank/>
+        <R label="OTHER COMPREHENSIVE INCOME" section />
+        <R label="Items that will not be reclassified to profit or loss" subheader />
+        {ociLines.filter(l=>['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
+          <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2}/>
+        ))}
+        <R label="Items that may be reclassified subsequently to profit or loss" subheader />
+        {ociLines.filter(l=>!['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
+          <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2}/>
+        ))}
+        {ociLines.length===0 && <tr><td colSpan={hasPY?5:4} className="px-10 py-1.5 text-xs text-slate-400 italic">No OCI items — map to OCI sheet in Mapping page if applicable</td></tr>}
+        <R label="Other comprehensive income for the year, net of tax" amount={ociTotal} pyAmt={pyOCI} bold borderTop />
+        <Blank/>
+        <R label={ciLabel} amount={totalCI} pyAmt={pyCI} bold borderTop />
+      </>}
+      <Blank/>
+      <R label="Earnings Per Share" bold />
+      <R label="Basic EPS" amount={null} indent={2} />
+      <R label="Diluted EPS" amount={null} indent={2} />
+    </>
+  );
+
   return (
     <div>
       <div className="text-center mb-5">
@@ -346,66 +569,15 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
       <table className="w-full text-sm border border-slate-300 rounded-lg overflow-hidden">
         <thead><TableHeader hasPY={hasPY} cyYear={cyYear} pyYear={pyYear} cyDate={cyDate} pyDate={pyDate} currSymbol={currSymbol} /></thead>
         <tbody>
-          <R label="REVENUE" section />
-          <Lines arr={revenueLines} />
-          <R label="Total Revenue" amount={totalRevenue} pyAmt={pyRevenue} bold borderTop /><Blank/>
-          {cosLines.length>0 && <>
-            <R label="Cost of Sales" subheader />
-            <Lines arr={cosLines} />
-            <R label="Total Cost of Sales" amount={totalCOS} pyAmt={pyCOS} bold borderTop /><Blank/>
-          </>}
-          {cosLines.length>0 && <><R label="GROSS PROFIT / (LOSS)" amount={grossProfit} pyAmt={pyGross} bold borderTop /><Blank/></>}
-          {isIFRS && <>
-            <R label="Other Income" subheader />
-            {otherIncomeLines.length>0 ? <Lines arr={otherIncomeLines}/> : <R label="Other Income" amount={0} pyAmt={hasPY?0:null} indent={2}/>}
-            <Blank/>
-          </>}
-          {!isIFRS && otherIncomeLines.length>0 && <>
-            <R label="II. OTHER INCOME" subheader />
-            <Lines arr={otherIncomeLines} />
-            <R label="Total Income" amount={totalRevenue+totalOtherIncome} pyAmt={hasPY?(pyRevenue+pyOtherIncome):null} bold borderTop /><Blank/>
-          </>}
-          <R label="OPERATING EXPENSES" section />
-          {sellingLines.length>0 && <><R label="Distribution / Selling Expenses" subheader /><Lines arr={sellingLines}/></>}
-          {adminLines.length>0   && <><R label="Administrative Expenses" subheader /><Lines arr={adminLines}/></>}
-          {deprLines.length>0    && <><R label="Depreciation and Amortisation" subheader /><Lines arr={deprLines}/></>}
-          <R label="Total Operating Expenses" amount={totalOpex} pyAmt={pyOpex} bold borderTop /><Blank/>
-          <R label="OPERATING PROFIT / (LOSS)" amount={operatingProfit} pyAmt={pyOpProfit} bold borderTop /><Blank/>
-          <R label="Finance Costs" subheader />
-          {finCostLines.length>0 ? <Lines arr={finCostLines}/> : <R label="Finance Costs" amount={0} pyAmt={hasPY?0:null} indent={2}/>}
-          <Blank/>
-          <R label="PROFIT / (LOSS) BEFORE TAX" amount={pbt} pyAmt={pyPBT} bold borderTop /><Blank/>
-          <R label="Tax Expense" subheader />
-          {taxLines.length>0 ? <Lines arr={taxLines}/> : <R label="Income Tax Expense" amount={0} pyAmt={hasPY?0:null} indent={2}/>}
-          <Blank/>
-          <R label="PROFIT / (LOSS) FOR THE YEAR" amount={pat} pyAmt={pyPAT} bold borderTop />
-          {cfg.hasOCI && <>
-            <Blank/>
-            <R label="OTHER COMPREHENSIVE INCOME" section />
-            <R label="Items not reclassified to profit or loss" subheader />
-            {ociLines.filter(l=>['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
-              <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2}/>
-            ))}
-            <R label="Items that may be reclassified to profit or loss" subheader />
-            {ociLines.filter(l=>!['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
-              <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2}/>
-            ))}
-            {ociLines.length===0 && <tr><td colSpan={hasPY?5:4} className="px-10 py-1.5 text-xs text-slate-400 italic">No OCI items — map to OCI sheet in Mapping page if applicable</td></tr>}
-            <R label="Total Other Comprehensive Income / (Loss)" amount={ociTotal} pyAmt={pyOCI} bold borderTop /><Blank/>
-            <R label="TOTAL COMPREHENSIVE INCOME FOR THE YEAR" amount={totalCI} pyAmt={pyCI} bold borderTop />
-          </>}
-          <Blank/>
-          <R label="Earnings Per Share (Face Value — see Note)" bold borderTop />
-          <R label="Basic EPS" amount={null} indent={2} />
-          <R label="Diluted EPS" amount={null} indent={2} />
+          {isIFRS ? renderIFRS() : renderAS()}
         </tbody>
       </table>
       <div className="mt-4 grid grid-cols-4 gap-3">
         {[
-          { label:'Gross Profit',      cy:grossProfit,     py:pyGross,    color:'bg-blue-50 border-blue-200 text-blue-800' },
-          { label:'Operating Profit',  cy:operatingProfit, py:pyOpProfit, color:'bg-indigo-50 border-indigo-200 text-indigo-800' },
-          { label:'Profit Before Tax', cy:pbt,             py:pyPBT,      color:'bg-amber-50 border-amber-200 text-amber-800' },
-          { label:'Profit After Tax',  cy:pat,             py:pyPAT,      color:pat>=0?'bg-green-50 border-green-200 text-green-800':'bg-red-50 border-red-200 text-red-800' },
+          { label: grossProfit>=0 ? 'Gross Profit' : 'Gross Loss',         cy:grossProfit,  py:pyGross,  color: grossProfit>=0  ? 'bg-blue-50 border-blue-200 text-blue-800'   : 'bg-red-50 border-red-200 text-red-800' },
+          { label: pbtClean>=0    ? 'Profit Before Tax' : 'Loss Before Tax', cy:pbtClean,    py:pyPBT,    color: pbtClean>=0     ? 'bg-amber-50 border-amber-200 text-amber-800' : 'bg-red-50 border-red-200 text-red-800' },
+          { label: pat>=0         ? 'Profit After Tax'  : 'Loss After Tax',  cy:pat,         py:pyPAT,    color: pat>=0          ? 'bg-green-50 border-green-200 text-green-800' : 'bg-red-50 border-red-200 text-red-800' },
+          { label: totalCI>=0     ? 'Total Comprehensive Income' : 'Total Comprehensive Loss', cy:totalCI, py:pyCI, color: totalCI>=0 ? 'bg-indigo-50 border-indigo-200 text-indigo-800' : 'bg-red-50 border-red-200 text-red-800' },
         ].map(s=>(
           <div key={s.label} className={`border rounded-xl p-3 ${s.color}`}>
             <div className="text-xs font-medium opacity-70">{s.label}</div>
@@ -417,7 +589,7 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
     </div>
   );
 }
- 
+
 // ── CFS ───────────────────────────────────────────────────────────────────────
 function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, divisor, currSymbol, hasPY, pyBsLines, pyPlLines, cyDate, pyDate, locale = 'en-IN' }) {
   const D          = divisor;
@@ -430,7 +602,7 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
   const depr         = expenseLines.filter(l=>['depreciation','amortis'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const finCost      = expenseLines.filter(l=>['finance cost','interest expense','bank charge'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const isIFRS       = method==='IFRS'||method==='IFRS_SME';
- 
+
   // PY cash = opening cash for CFS (prior year closing = current year opening)
   const pyIncome  = hasPY ? incomeLines.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const pyExpense = hasPY ? expenseLines.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
@@ -440,7 +612,7 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
     : 0;
   const pyDepr    = hasPY ? expenseLines.filter(l=>['depreciation','amortis'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const pyFinCost = hasPY ? expenseLines.filter(l=>['finance cost','interest expense','bank charge'].some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
- 
+
   const CRow = ({label, amount, bold, indent}) => (
     <tr className={`${bold?'border-t-2 border-slate-500 bg-slate-50 font-bold':'border-b border-slate-100 hover:bg-blue-50'}`}>
       <td className={`py-2 text-sm ${indent===2?'pl-10':indent?'pl-6':'pl-3'} ${bold?'font-bold text-slate-900':'text-slate-700'}`}>{label}</td>
@@ -448,7 +620,7 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
     </tr>
   );
   const SH = ({label}) => <tr className="bg-slate-100"><td colSpan={2} className="px-3 py-2 font-bold text-slate-700 text-xs uppercase">{label}</td></tr>;
- 
+
   return (
     <div>
       <div className="text-center mb-4">
@@ -503,7 +675,7 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
     </div>
   );
 }
- 
+
 // ── OCI ───────────────────────────────────────────────────────────────────────
 function OCIStatement({ lines, divisor, currSymbol, hasPY, locale = 'en-IN' }) {
   const D      = divisor;
@@ -552,7 +724,7 @@ function OCIStatement({ lines, divisor, currSymbol, hasPY, locale = 'en-IN' }) {
     </div>
   );
 }
- 
+
 // ── SOCE ─────────────────────────────────────────────────────────────────────
 function SOCEStatement({ bsLines, plLines, divisor, currSymbol, hasPY, locale = 'en-IN' }) {
   const D      = divisor;
@@ -560,10 +732,10 @@ function SOCEStatement({ bsLines, plLines, divisor, currSymbol, hasPY, locale = 
   const pat    = plLines.filter(l=>l.assetLiability==='Income').reduce((s,l)=>s+Number(l.totalFinalNet||0),0)
                - plLines.filter(l=>l.assetLiability==='Expenses'&&l.sheet==='PL').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const total  = equity.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
- 
+
   // PY closing = CY opening
   const pyEquity  = hasPY ? equity.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
- 
+
   return (
     <div>
       <div className="text-center mb-5">
@@ -607,7 +779,7 @@ function SOCEStatement({ bsLines, plLines, divisor, currSymbol, hasPY, locale = 
     </div>
   );
 }
- 
+
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function FinancialStatements() {
   const { engagementId }          = useParams();
@@ -621,12 +793,12 @@ export default function FinancialStatements() {
   const [unit, setUnit]             = useState(UNITS[0]);
   const [cfsMethod, setCfsMethod]   = useState('indirect');
   const [fsErrors, setFsErrors]     = useState([]);
- 
+
   const method     = currentEngagement?.method || 'AS';
   const currency   = (method==='IFRS'||method==='IFRS_SME') ? 'AED' : 'INR';
   const currSymbol = currency;
   const cfg        = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
- 
+
   // Region: UAE if IFRS method or client is UAE
   const region  = (method==='IFRS'||method==='IFRS_SME') ? 'UAE'
     : (currentClient?.region==='UAE'||currentClient?.country==='UAE') ? 'UAE'
@@ -634,7 +806,7 @@ export default function FinancialStatements() {
   const isUAE   = region === 'UAE';
   // Number format: Indian comma style for India, standard for UAE
   const locale  = isUAE ? 'en-US' : 'en-IN';
- 
+
   // ── Derive FY year labels and date headers from engagement financialYear ──
   // India FY format: "2024-25"  → BS date "as at 31 March 2025"
   //                               PL date "for the year ended 31 March 2025"
@@ -643,10 +815,10 @@ export default function FinancialStatements() {
   //                               PL date "for the year ended 31 December 2024"
   //                               PY BS   "as at 31 December 2023"
   const fy = currentEngagement?.financialYear || '';
- 
+
   function deriveDates(fyStr) {
     if (!fyStr) return { cyDate: '', pyDate: '', cyYear: 'Current Year', pyYear: 'Previous Year' };
- 
+
     // India format: "2024-25" — year ending is the second part → 2025 → 31 March 2025
     const m1 = fyStr.match(/^(\d{4})-(\d{2,4})$/);
     if (m1) {
@@ -659,7 +831,7 @@ export default function FinancialStatements() {
         pyYear:  `${startYear}-${String(startYear+1).slice(-2)}`,
       };
     }
- 
+
     // UAE format: "2024" — calendar year → 31 December 2024
     const m2 = fyStr.match(/^(\d{4})$/);
     if (m2) {
@@ -671,14 +843,14 @@ export default function FinancialStatements() {
         pyYear:  String(yr - 1),
       };
     }
- 
+
     return { cyDate: fyStr, pyDate: '', cyYear: fyStr, pyYear: 'Previous Year' };
   }
- 
+
   const { cyDate, pyDate, cyYear, pyYear } = deriveDates(fy);
- 
+
   useEffect(() => { load(); }, [engagementId]);
- 
+
   async function load() {
     setLoading(true);
     try {
@@ -688,7 +860,7 @@ export default function FinancialStatements() {
     } catch { setData(null); setHasPY(false); }
     finally { setLoading(false); }
   }
- 
+
   async function generate() {
     setGenerating(true);
     try {
@@ -709,19 +881,19 @@ export default function FinancialStatements() {
     } catch (err) { toast.error(err?.error || 'Generation failed'); }
     finally { setGenerating(false); }
   }
- 
+
   const allLines   = Object.values(data || {}).flat();
   const getLines   = sheet => (data?.[sheet] || []).filter(l => !hidden[l.groupName]);
   const toggleHide = key   => setHidden(h => ({ ...h, [key]: !h[key] }));
   const hiddenCount = Object.values(hidden).filter(Boolean).length;
- 
+
   const tabs = cfg.tabs.map(key => ({
     key,
     label: { BS:'Balance Sheet', PL:'P & L', CFS:'Cash Flow', OCI:'OCI', SOCE:'SOCE' }[key] || key,
   }));
- 
+
   if (loading) return <div className="p-8 text-slate-400">Loading...</div>;
- 
+
   return (
     <div className="p-6 max-w-6xl">
       {/* Header */}
@@ -753,7 +925,7 @@ export default function FinancialStatements() {
           </button>
         </div>
       </div>
- 
+
       {/* Validation errors */}
       {fsErrors.length > 0 && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl">
@@ -761,7 +933,7 @@ export default function FinancialStatements() {
           {fsErrors.map((e,i) => <p key={i} className="text-xs text-red-600">{e.message}</p>)}
         </div>
       )}
- 
+
       {/* Tabs */}
       <div className="flex gap-0 mb-6 border-b border-slate-200 overflow-x-auto">
         {tabs.map(t => (
@@ -771,7 +943,7 @@ export default function FinancialStatements() {
           </button>
         ))}
       </div>
- 
+
       {!data || Object.keys(data).length === 0 ? (
         <div className="text-center py-20 bg-white border border-slate-200 rounded-xl text-slate-400">
           <div className="text-5xl mb-4">📋</div>
@@ -793,4 +965,3 @@ export default function FinancialStatements() {
     </div>
   );
 }
- 
