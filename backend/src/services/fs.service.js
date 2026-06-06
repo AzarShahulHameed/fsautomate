@@ -418,6 +418,8 @@ async function generateFS(engagementId, firmId) {
   }
 
   // Bulk-insert CY FSLines
+  // isPriorYear column may not exist if migration hasn't been run yet.
+  // Try with it first; if Postgres complains the column is missing, retry without it.
   let order = 0;
   const cyLineRows = sortedCYAggs.map(agg => ({
     engagementId,
@@ -430,7 +432,17 @@ async function generateFS(engagementId, firmId) {
     assetLiability: agg.assetLiability,
     isPriorYear:    false,
   }));
-  await prisma.fSLine.createMany({ data: cyLineRows, skipDuplicates: true });
+  try {
+    await prisma.fSLine.createMany({ data: cyLineRows, skipDuplicates: true });
+  } catch (colErr) {
+    if (colErr.message?.includes('isPriorYear') || colErr.message?.includes('column')) {
+      console.warn('[FS] isPriorYear column missing — inserting without it (run migration)');
+      const cyLineRowsNoFlag = cyLineRows.map(({ isPriorYear, ...rest }) => rest);
+      await prisma.fSLine.createMany({ data: cyLineRowsNoFlag, skipDuplicates: true });
+    } else {
+      throw colErr;
+    }
+  }
 
   // Build fsLineData for return value (enrich with noteGroup)
   const fsLineData = cyLineRows.map(line => ({
@@ -475,7 +487,16 @@ async function generateFS(engagementId, firmId) {
       });
     }
     if (pyLineRows.length > 0) {
-      await prisma.fSLine.createMany({ data: pyLineRows, skipDuplicates: true });
+      try {
+        await prisma.fSLine.createMany({ data: pyLineRows, skipDuplicates: true });
+      } catch (pyColErr) {
+        if (pyColErr.message?.includes('isPriorYear') || pyColErr.message?.includes('column')) {
+          console.warn('[FS] isPriorYear column missing for PY — skipping PY lines (run migration)');
+          // PY lines can't be stored without the column — hasPY will be false on getFS
+        } else {
+          throw pyColErr;
+        }
+      }
     }
   }
 
