@@ -1,6 +1,7 @@
 // src/pages/AuditLog.jsx
 import React, { useState, useEffect, useCallback } from 'react';
 import { useStore } from '../store';
+import api from '../api/client';
 import toast from 'react-hot-toast';
 
 function timeAgo(date) {
@@ -36,12 +37,7 @@ export default function AuditLog() {
       if (f.entityType) params.set('entityType', f.entityType);
       if (f.userId)     params.set('userId', f.userId);
 
-      const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-      const res   = await fetch(`/api/audit?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Failed');
-      const data = await res.json();
+      const data = await api.get(`/audit?${params}`);
       setLogs(data.logs || []);
       setTotal(data.pagination?.total || 0);
       setPages(data.pagination?.pages || 1);

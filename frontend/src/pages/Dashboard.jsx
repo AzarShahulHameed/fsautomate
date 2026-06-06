@@ -59,9 +59,7 @@ export default function Dashboard() {
 
   useEffect(() => {
     Promise.all([
-      fetch('/api/dashboard/summary', {
-        headers: { Authorization: `Bearer ${localStorage.getItem('token') || sessionStorage.getItem('token') || ''}` },
-      }).then(r => r.ok ? r.json() : null).catch(() => null),
+      api.get('/dashboard/summary').catch(() => null),
       clientAPI.list().catch(() => []),
     ]).then(([sum, cls]) => {
       setSummary(sum);

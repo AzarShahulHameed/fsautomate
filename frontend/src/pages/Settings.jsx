@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { useStore } from '../store';
 import { authAPI, uploadAPI, prefsAPI } from '../api/client';
+import api from '../api/client';
 import toast from 'react-hot-toast';
 
 function Avatar({ user, size = 'xl' }) {
@@ -65,16 +66,14 @@ function SessionManager() {
   }, []);
 
   async function revoke(id) {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-    await fetch(`/api/auth/sessions/${id}`, { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    await api.delete(`/auth/sessions/${id}`);
     setSessions(prev => prev.filter(s => s.id !== id));
     toast.success('Session revoked');
   }
 
   async function revokeAll() {
     if (!window.confirm('Log out all other sessions?')) return;
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-    await fetch('/api/auth/sessions', { method: 'DELETE', headers: { Authorization: `Bearer ${token}` } });
+    await api.delete('/auth/sessions');
     setSessions(prev => prev.filter(s => s.isCurrent));
     toast.success('All other sessions logged out');
   }
@@ -121,10 +120,7 @@ function BillingTab({ firmId, currency }) {
   const [upgrading,   setUpgrading]   = React.useState(false);
 
   React.useEffect(() => {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-    fetch('/api/billing/plan', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.json()).then(d => { setPlanInfo(d); setLoading(false); })
-      .catch(() => setLoading(false));
+    api.get('/billing/plan').then(d => { setPlanInfo(d); setLoading(false); }).catch(() => setLoading(false));
   }, []);
 
   const currSymbol = currency === 'AED' ? 'AED ' : '₹';
@@ -751,10 +747,7 @@ export default function Settings() {
                 </div>
                 <button onClick={async () => {
                   try {
-                    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-                    const res   = await fetch('/api/data-export', { headers: { Authorization: `Bearer ${token}` } });
-                    if (!res.ok) throw new Error('Failed');
-                    const blob  = await res.blob();
+                    const blob = await api.get('/data-export', { responseType: 'blob' });
                     const url   = URL.createObjectURL(blob);
                     const a     = document.createElement('a');
                     a.href = url; a.download = 'firm-data-export.zip'; a.click();

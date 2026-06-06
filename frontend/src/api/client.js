@@ -45,12 +45,12 @@ export const authAPI = {
   getPageState:   ()     => api.get('/auth/page-state'),
   updateProfile:  (data) => api.patch('/auth/profile', data),
   changePassword: (data) => api.patch('/auth/password', data),
-  updateFirm:     (data) => api.patch('/auth/firm', data),
+  updateFirm:     (data) => api.patch('/auth/firm', data),,
   forgotPassword: (email)           => api.post('/auth/forgot-password', { email }),
   resetPassword:  (token, password) => api.post('/auth/reset-password',  { token, password }),
   invite:         (email, role)     => api.post('/auth/invite',          { email, role }),
   validateInvite: (token)           => api.get(`/auth/invite/${token}`),
-  acceptInvite:   (data)            => api.post('/auth/accept-invite',   data),
+  acceptInvite:   (data)            => api.post('/auth/accept-invite',   data),,
   // User management (FIRM_ADMIN only)
   listUsers:      ()           => api.get('/auth/users'),
   changeRole:     (id, role)   => api.patch(`/auth/users/${id}/role`,       { role }),
@@ -75,7 +75,7 @@ export const engagementAPI = {
   setStatus:     (id, status) => api.patch(`/engagements/${id}/status`, { status }),
   delete:        (id)         => api.delete(`/engagements/${id}`),
   validation:    (id)         => api.get(`/engagements/${id}/validation-checks`),
-  runValidation: (id)         => api.post(`/engagements/${id}/validation-checks`),
+  runValidation: (id)         => api.post(`/engagements/${id}/validation-checks`),,
   // User assignment
   listEngagementUsers:   (eid)         => api.get(`/engagements/${eid}/users`),
   assignUser:            (eid, userId, role) => api.post(`/engagements/${eid}/users`, { userId, role }),
@@ -108,7 +108,7 @@ export const mappingAPI = {
   status:       (eid)              => api.get(`/mapping/${eid}/status`),
   autoMap:      (eid)              => api.post(`/mapping/${eid}/auto`),
   save:         (eid, data)        => api.put(`/mapping/${eid}/manual`, data),
-  master:       (method, search)   => api.get(`/mapping/master`, { params: { method, search } }),
+  master:       (method, search)   => api.get(`/mapping/master`, { params: { method, search } }),,
   copyFrom:  (eid, srcEid) => api.post(`/mapping/${eid}/copy-from/${srcEid}`),
   deleteRow: (eid, sg)     => api.delete(`/mapping/${eid}/row/${encodeURIComponent(sg)}`),
 };
@@ -194,6 +194,44 @@ export const exportAPI = {
       return r.blob();
     });
   },
+};
+
+// ─── Schedules API ─────────────────────────────────────────────────────────────
+export const schedulesAPI = {
+  // PPE
+  getPPE:            (eid)       => api.get(`/schedules/${eid}/ppe`),
+  savePPE:           (eid,id,d)  => api.put(`/schedules/${eid}/ppe/${id}`, d),
+  addPPE:            (eid,d)     => api.post(`/schedules/${eid}/ppe`, d),
+  deletePPE:         (eid,id)    => api.delete(`/schedules/${eid}/ppe/${id}`),
+  // Intangibles
+  getIntangibles:    (eid)       => api.get(`/schedules/${eid}/intangibles`),
+  saveIntangible:    (eid,id,d)  => api.put(`/schedules/${eid}/intangibles/${id}`, d),
+  addIntangible:     (eid,d)     => api.post(`/schedules/${eid}/intangibles`, d),
+  deleteIntangible:  (eid,id)    => api.delete(`/schedules/${eid}/intangibles/${id}`),
+  // Related Party
+  getRelatedParties: (eid)       => api.get(`/schedules/${eid}/related-parties`),
+  addParty:          (eid,d)     => api.post(`/schedules/${eid}/related-parties`, d),
+  updateParty:       (eid,id,d)  => api.put(`/schedules/${eid}/related-parties/${id}`, d),
+  deleteParty:       (eid,id)    => api.delete(`/schedules/${eid}/related-parties/${id}`),
+  addTransaction:    (eid,pid,d) => api.post(`/schedules/${eid}/related-parties/${pid}/transactions`, d),
+  updateTransaction: (eid,tid,d) => api.put(`/schedules/${eid}/transactions/${tid}`, d),
+  deleteTransaction: (eid,tid)   => api.delete(`/schedules/${eid}/transactions/${tid}`),
+  // EPS
+  getEPS:            (eid)   => api.get(`/schedules/${eid}/eps`),
+  saveEPS:           (eid,d) => api.put(`/schedules/${eid}/eps`, d),
+  // Deferred Tax
+  getDeferredTax:    (eid)      => api.get(`/schedules/${eid}/deferred-tax`),
+  addDTItem:         (eid,d)    => api.post(`/schedules/${eid}/deferred-tax`, d),
+  saveDTItem:        (eid,id,d) => api.put(`/schedules/${eid}/deferred-tax/${id}`, d),
+  deleteDTItem:      (eid,id)   => api.delete(`/schedules/${eid}/deferred-tax/${id}`),
+  // Financial Instruments
+  getFinInstruments: (eid)   => api.get(`/schedules/${eid}/financial-instruments`),
+  saveFinInstruments:(eid,d) => api.put(`/schedules/${eid}/financial-instruments`, d),
+  // Contingencies
+  getContingencies:  (eid)      => api.get(`/schedules/${eid}/contingencies`),
+  addContingency:    (eid,d)    => api.post(`/schedules/${eid}/contingencies`, d),
+  saveContingency:   (eid,id,d) => api.put(`/schedules/${eid}/contingencies/${id}`, d),
+  deleteContingency: (eid,id)   => api.delete(`/schedules/${eid}/contingencies/${id}`),
 };
 
 // ─── Share Link API ────────────────────────────────────────────────────────────

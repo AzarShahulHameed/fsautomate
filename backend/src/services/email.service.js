@@ -35,7 +35,7 @@ async function sendEmail({ to, subject, html }) {
   // 1. Resend
   if (process.env.RESEND_API_KEY) {
     try {
-      const { Resend } = require('resend');
+      let Resend; try { Resend = require('resend').Resend; } catch { console.warn('[Email] npm install resend'); throw new Error('resend not installed'); }
       const resend = new Resend(process.env.RESEND_API_KEY);
       const result = await resend.emails.send({ from: FROM, to, subject, html });
       console.log(`[Email] Sent via Resend to ${to} — id: ${result?.id}`);
