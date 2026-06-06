@@ -166,7 +166,8 @@ function aggregateTBRows(tbRows, mappingIndex, method, masterIndex = new Map()) 
     // Classification: read directly from MasterGrouping (zero keyword hardcoding)
     // MasterGrouping is the single source of truth — every field is set in reference data.
     // classify() is only used as a last-resort fallback for custom groupNames not in master.
-    const masterRow = mapping.masterGroupingId ? masterIndex.get(mapping.masterGroupingId) : null;
+    // Look up by groupName (lowercase) — resilient to stale masterGroupingId UUIDs
+    const masterRow = masterIndex.get(mapping.groupName?.trim().toLowerCase()) || null;
     let al, sheet, currentNonCurrent, plCategory, isCashItem;
 
     if (masterRow?.assetLiability && masterRow?.sheet) {
@@ -276,31 +277,27 @@ async function generateFS(engagementId, firmId) {
 
   const mappingIndex = new Map(mappings.map(m => [m.subGrouping.trim().toLowerCase(), m]));
 
-  // ── Build MasterGrouping index for authoritative classification ───────────
-  const masterGroupingIds = [...new Set(mappings.map(m => m.masterGroupingId).filter(Boolean))];
+  // ── Build MasterGrouping index keyed by groupName (resilient to re-seeding) ─
+  // Keying by groupName (not UUID) means stale Mapping.masterGroupingId values
+  // don't break generation. Any re-seed/truncate of MasterGrouping is safe.
   let masterIndex = new Map();
-  if (masterGroupingIds.length > 0) {
-    try {
-      // Full select including new metadata fields (requires schema.prisma update + prisma generate)
-      const masterRows = await prisma.masterGrouping.findMany({
-        where: { id: { in: masterGroupingIds } },
-        select: {
-          id: true, assetLiability: true, sheet: true,
-          displayOrder: true, noteGroupId: true,
-          currentNonCurrent: true, plCategory: true, isCashItem: true,
-        },
-      });
-      masterIndex = new Map(masterRows.map(r => [r.id, r]));
-    } catch (schemaErr) {
-      // Fallback: Prisma client not yet regenerated — select without new fields
-      // This happens when schema.prisma hasn't been deployed yet
-      console.warn('[FS] Falling back to basic MasterGrouping select (run prisma generate):', schemaErr.message);
-      const masterRows = await prisma.masterGrouping.findMany({
-        where: { id: { in: masterGroupingIds } },
-        select: { id: true, assetLiability: true, sheet: true, displayOrder: true, noteGroupId: true },
-      });
-      masterIndex = new Map(masterRows.map(r => [r.id, r]));
+  try {
+    const applicabilities = ['ALL'];
+    if (['AS','IND_AS','IFRS','IFRS_SME'].includes(method)) applicabilities.push(method);
+    const masterRows = await prisma.masterGrouping.findMany({
+      where: { isActive: true, methodApplicability: { in: applicabilities } },
+      select: {
+        id: true, groupName: true, assetLiability: true, sheet: true,
+        displayOrder: true, noteGroupId: true,
+        currentNonCurrent: true, plCategory: true, isCashItem: true,
+      },
+    });
+    for (const r of masterRows) {
+      const key = r.groupName.trim().toLowerCase();
+      if (!masterIndex.has(key)) masterIndex.set(key, r);
     }
+  } catch (schemaErr) {
+    console.warn('[FS] MasterGrouping lookup failed, using classify() fallback:', schemaErr.message);
   }
 
   // ── Aggregate CY ──────────────────────────────────────────────────────────
