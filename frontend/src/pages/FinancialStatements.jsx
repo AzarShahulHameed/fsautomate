@@ -99,9 +99,6 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
   const liab   = vis.filter(l => l.assetLiability === 'Liabilities');
   const assets = vis.filter(l => l.assetLiability === 'Assets');
 
-  const isShortTerm = n => n.includes('short term') || n.includes('short-term');
-  const isLongTerm  = n => (n.includes('long term') || n.includes('long-term')) && !isShortTerm(n);
-
   // BS sub-section classification — reads currentNonCurrent from FSLine (set by MasterGrouping)
   // Zero keyword matching. If currentNonCurrent is null (custom item), defaults to noncurrent.
   const isNC = l => l.currentNonCurrent === 'noncurrent' || l.currentNonCurrent === null;
@@ -111,12 +108,9 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
   const cAssets     = assets.filter(l => isCA(l));
   const otherAssets = []; // all assets now classified explicitly
 
-  const NCL_KEYWORDS = ['long term borrowing','long-term borrowing','non-current borrowing','term loan','debenture','bond','note payable long','loan from bank','loan from financial institution','loan from nbfc','foreign currency loan','ecb','external commercial borrowing','lease liabilit','finance lease','right-of-use liab','provision for gratuity','gratuity liabilit','pension liabilit','post employment benefit','defined benefit','employee benefit liabilit','compensated absence','leave encashment liabilit','deferred tax liabilit','deferred tax liab','other non-current liabilit','other long term liabilit','non-current liabilit','security deposit received','deferred revenue long','deferred income long','loan from related party long','loan from director long'];
-  const CL_KEYWORDS  = ['trade payable','trade and other payable','account payable','sundry creditor','creditor','bill payable','note payable','short term borrowing','short-term borrowing','working capital loan','cash credit','bank overdraft','overdraft','packing credit','loan repayable','current maturit','installment due','other payable','other current liabilit','accrued expense','accrual','statutory due','statutory liabilit','advance from customer','advance received','customer deposit','deferred revenue','deferred income','unclaimed dividend','unpaid dividend','dividend payable','vat payable','gst payable','tax payable','income tax payable','tds payable','service tax payable','duties and tax','provision for tax','provision for income tax','salary payable','wages payable','employee payable','pf payable','esic payable','pt payable','directors loan','director loan','due to director','loan from shareholder','shareholder loan','due to related','due to subsidiary','due to associate','short term provision','provision for expense','provision for audit','provision for warranty','proposed dividend'];
-
-  const ncLiab    = liab.filter(l=>{ const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return false; if(isLongTerm(n)) return true; return NCL_KEYWORDS.some(k=>n.includes(k)); });
-  const cLiab     = liab.filter(l=>{ const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return true; if(isLongTerm(n)) return false; if(NCL_KEYWORDS.some(k=>n.includes(k))) return false; return CL_KEYWORDS.some(k=>n.includes(k)); });
-  const otherLiab = liab.filter(l=>{ const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return false; if(isLongTerm(n)) return false; if(NCL_KEYWORDS.some(k=>n.includes(k))) return false; if(CL_KEYWORDS.some(k=>n.includes(k))) return false; return true; });
+  const ncLiab    = liab.filter(l => l.currentNonCurrent === 'noncurrent' || l.currentNonCurrent === null);
+  const cLiab     = liab.filter(l => l.currentNonCurrent === 'current');
+  const otherLiab = [];
 
   const sumCY = arr => arr.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const sumPY = arr => arr.reduce((s,l)=>s+Number(l.pyAmount||0),0);
@@ -249,33 +243,15 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
   const revenueLines     = plLines.filter(l => l.plCategory === 'revenue');
   const otherIncomeLines = plLines.filter(l => l.plCategory === 'otherIncome');
 
-  // ── Expense classification ────────────────────────────────────────────────
-  const cosKW      = ['cost of sale','cost of good','cost of material','cost of revenue',
-                      'cost of service','direct cost','purchase of stock','changes in inventor',
-                      'material consumed','subcontract','job work','labour cost','labor cost'];
-  const cosLines   = plLines.filter(l => isExpense(l) && (() => {
-    const n = l.groupName?.toLowerCase()||'';
-    return cosKW.some(k=>n.includes(k)) || n==='purchases' || n==='purchase';
-  })());
-
+  // ── Expense classification — reads plCategory (zero keyword matching) ─────
+  const cosLines      = plLines.filter(l => l.plCategory === 'cos');
   const finCostLines  = plLines.filter(l => l.plCategory === 'financeCost');
-
   const deprLines     = plLines.filter(l => l.plCategory === 'depreciation');
-
-  const taxKW    = ['tax expense','income tax expense','current tax','deferred tax expense','provision for tax','tax expense:'];
-  const taxLines      = plLines.filter(l => l.plCategory === 'tax');se(l) && exceptKW.some(k=>l.groupName?.toLowerCase().includes(k));
-
-  // AS/Ind AS: all non-cos, non-finance, non-depr, non-tax expenses are "other expenses by nature"
-  // IFRS: split into selling/admin
-  const sellingKW    = ['selling','distribution','marketing','advertising'];
-  const sellingLines = plLines.filter(l => isExpense(l)
-    && sellingKW.some(k=>l.groupName?.toLowerCase().includes(k))
-    && !cosLines.includes(l) && !taxLines.includes(l) && !finCostLines.includes(l));
-
-  // Everything else = employee costs + other expenses (for AS: all by nature)
-  const otherExpLines = plLines.filter(l => isExpense(l)
-    && !cosLines.includes(l) && !finCostLines.includes(l) && !deprLines.includes(l)
-    && !taxLines.includes(l) && !sellingLines.includes(l) && !exceptLines.includes(l));
+  const taxLines      = plLines.filter(l => l.plCategory === 'tax');
+  const sellingLines  = plLines.filter(l => l.plCategory === 'selling');
+  const otherExpLines = plLines.filter(l => l.plCategory === 'admin');
+  const exceptLines   = plLines.filter(l => isExpense(l) &&
+    !['cos','financeCost','depreciation','tax','selling','admin'].includes(l.plCategory||''));
 
   // ── Compute totals ────────────────────────────────────────────────────────
   const sum   = arr => arr.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
@@ -407,11 +383,7 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
         <Blank/>
         <R label="OTHER COMPREHENSIVE INCOME" section />
         <R label="A. Items that will not be reclassified to profit or loss" subheader />
-        {ociLines.filter(l=>['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
-          <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2}/>
-        ))}
-        <R label="B. Items that will be reclassified to profit or loss" subheader />
-        {ociLines.filter(l=>!['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
+        {ociLines.map((l,i)=>(
           <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2}/>
         ))}
         {ociLines.length===0 && <tr><td colSpan={hasPY?5:4} className="px-10 py-1.5 text-xs text-slate-400 italic">No OCI items — map to OCI sheet in Mapping page if applicable</td></tr>}
@@ -488,11 +460,11 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
         <Blank/>
         <R label="OTHER COMPREHENSIVE INCOME" section />
         <R label="Items that will not be reclassified to profit or loss" subheader />
-        {ociLines.filter(l=>['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
+        {ociLines.filter(l=>l.noteGroupId?.includes('PERM')||l.noteGroupId?.includes('DB')||l.noteGroupId?.includes('ESB')).map((l,i)=>(
           <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2}/>
         ))}
         <R label="Items that may be reclassified subsequently to profit or loss" subheader />
-        {ociLines.filter(l=>!['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
+        {ociLines.filter(l=>!l.noteGroupId?.includes('PERM')&&!l.noteGroupId?.includes('DB')&&!l.noteGroupId?.includes('ESB')).map((l,i)=>(
           <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber} amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2}/>
         ))}
         {ociLines.length===0 && <tr><td colSpan={hasPY?5:4} className="px-10 py-1.5 text-xs text-slate-400 italic">No OCI items — map to OCI sheet in Mapping page if applicable</td></tr>}
@@ -599,7 +571,6 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
 
   if (hasPY) {
     for (const cyLine of bsLines) {
-      const n = (cyLine.groupName||'').toLowerCase();
       const cyAmt = Number(cyLine.totalFinalNet||0);
       const pyAmt = Number(cyLine.pyAmount||0);
       if (cyLine.assetLiability === 'Assets') {
@@ -624,7 +595,6 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
 
   if (hasPY) {
     for (const cyLine of bsLines) {
-      const n = (cyLine.groupName||'').toLowerCase();
       if (cyLine.assetLiability === 'Liabilities' && cyLine.currentNonCurrent === 'noncurrent') {
         const movement = Number(cyLine.totalFinalNet||0) - Number(cyLine.pyAmount||0);
         netBorrowing += movement;
@@ -636,7 +606,9 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
 
   // Net change = Operating + Investing + Financing
   // Operating = operatingCashBeforeTax - taxPaid (we use pbt as before-tax approximation)
-  const netOperating = operatingCashBeforeTax - finCost; // subtract finCost (paid in financing)
+  // netOperating = full operating cash including finance cost addback
+  // Finance costs are paid in financing section — they cancel out in the total
+  const netOperating = operatingCashBeforeTax;
   const netChange    = netOperating + netInvesting + netFinancing;
 
   const CRow = ({label, amount, bold, indent, sub}) => (
@@ -677,12 +649,11 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
               <CRow label="Total Working Capital Changes" amount={workingCapitalChanges} indent bold={false} />
             </> : <CRow label="Working Capital Changes — upload prior year TB for details" amount={0} indent={2} sub />}
             <CRow label="Cash Generated from Operations" amount={operatingCashBeforeTax} bold />
-            <CRow label="Less: Finance Costs Paid" amount={-finCost} indent />
           </>:<>
             <CRow label="Cash receipts from customers" amount={totalIncome} indent />
             <CRow label="Cash paid to suppliers and employees" amount={-Math.abs(totalExpense-depr-finCost)} indent />
           </>}
-          <CRow label="Net Cash from Operating Activities (A)" amount={netOperating - finCost} bold />
+          <CRow label="Net Cash from Operating Activities (A)" amount={netOperating} bold />
           <SH label="B. Cash Flow from Investing Activities" />
           {hasPY ? <>
             {capexItems.map((it,i)=><CRow key={i} label={it.label} amount={it.amount} indent={2} sub />)}
@@ -741,7 +712,7 @@ function OCIStatement({ lines, divisor, currSymbol, hasPY, locale = 'en-IN' }) {
         </thead>
         <tbody>
           <tr className="bg-slate-100"><td colSpan={hasPY?3:2} className="px-3 py-2 text-xs font-bold text-slate-600 uppercase">A. Items not reclassified to P&L</td></tr>
-          {ociLines.filter(l=>['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
+          {ociLines.map((l,i)=>(
             <tr key={i} className="border-b hover:bg-blue-50">
               <td className="py-2 pl-8">{l.groupName}</td>
               <td className="py-2 pr-3 text-right font-mono">{fmt(l.totalFinalNet,D,locale)}</td>
@@ -749,13 +720,6 @@ function OCIStatement({ lines, divisor, currSymbol, hasPY, locale = 'en-IN' }) {
             </tr>
           ))}
           <tr className="bg-slate-100"><td colSpan={hasPY?3:2} className="px-3 py-2 text-xs font-bold text-slate-600 uppercase">B. Items that may be reclassified to P&L</td></tr>
-          {ociLines.filter(l=>!['actuarial','remeasurement','defined benefit'].some(k=>l.groupName?.toLowerCase().includes(k))).map((l,i)=>(
-            <tr key={i} className="border-b hover:bg-blue-50">
-              <td className="py-2 pl-8">{l.groupName}</td>
-              <td className="py-2 pr-3 text-right font-mono">{fmt(l.totalFinalNet,D,locale)}</td>
-              {hasPY && <td className="py-2 pr-3 text-right font-mono text-slate-400">{fmt(l.pyAmount??0,D,locale)}</td>}
-            </tr>
-          ))}
           {ociLines.length===0 && <tr><td colSpan={hasPY?3:2} className="py-8 text-center text-slate-400 italic text-sm">No OCI items mapped. Map OCI items in Mapping page.</td></tr>}
           <tr className="border-t-2 border-slate-600 font-bold bg-slate-50">
             <td className="px-3 py-2.5">Total Other Comprehensive Income</td>
