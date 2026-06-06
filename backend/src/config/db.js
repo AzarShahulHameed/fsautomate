@@ -75,7 +75,7 @@ const prismaWithRetry = new Proxy(prisma, {
     const value = target[prop];
     // Only proxy model delegates (objects with find/create/update etc.)
     // Skip internal Prisma methods ($connect, $disconnect, $transaction, etc.)
-    if (typeof value === 'object' && value !== null && !prop.startsWith('$') && !prop.startsWith('_')) {
+    if (typeof prop === 'string' && typeof value === 'object' && value !== null && !prop.startsWith('$') && !prop.startsWith('_')) {
       return new Proxy(value, {
         get(modelTarget, method) {
           const fn = modelTarget[method];

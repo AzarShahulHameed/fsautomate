@@ -71,8 +71,8 @@ async function autoMapFromMaster(engagementId, method) {
   const clientId = engagement.client.id;
 
   const masterRows = await loadMasterGrouping(method);
-  const masterBySubGroupNo   = new Map(masterRows.map(r => [r.subGroupNo.trim().toUpperCase(), r]));
-  const masterBySubGroupName = new Map(masterRows.map(r => [r.subGroupName.trim().toUpperCase(), r]));
+  const masterBySubGroupNo   = new Map(masterRows.filter(r=>r.subGroupNo).map(r => [String(r.subGroupNo).trim().toUpperCase(), r]));
+  const masterBySubGroupName = new Map(masterRows.filter(r=>r.subGroupName).map(r => [String(r.subGroupName).trim().toUpperCase(), r]));
 
   const latest = await prisma.tBVersion.findFirst({
     where: { engagementId, isPriorYear: false },
@@ -181,12 +181,14 @@ async function autoMapFromMaster(engagementId, method) {
       });
 
       // Master table hits also write to memory so next time they skip the master lookup
+      try {
       await memoryService.recordMemory({
         firmId, clientId: null, rawText: subGrouping,
         groupName: master.groupName, subGroupName: master.subGroupName,
         subGroupNo: master.subGroupNo, noteGroupId: master.noteGroupId,
         masterGroupingId: master.id, method, engagementId,
       });
+      } catch (memErr) { console.warn('[MappingMemory] Write skipped:', memErr.message); }
     } else {
       unmapped.push(subGrouping);
     }
@@ -234,9 +236,16 @@ async function autoMapIFRS(engagementId) {
 
   if (subGroupings.length === 0) return { mapped: 0, unmapped: [] };
 
-  // ── Step 1: Memory check ───────────────────────────────────────────────────
-  const { autoMapped: memAutoMapped, suggested: memSuggested, stillUnmapped } =
-    await memoryService.applyMemoryToUnmapped(subGroupings, firmId, clientId, method);
+  // ── Step 1: Memory check (safe) ───────────────────────────────────────────
+  let memAutoMapped = [], memSuggested = [], stillUnmapped = [...subGroupings];
+  try {
+    const memResult = await memoryService.applyMemoryToUnmapped(subGroupings, firmId, clientId, method);
+    memAutoMapped = memResult.autoMapped;
+    memSuggested  = memResult.suggested;
+    stillUnmapped = memResult.stillUnmapped;
+  } catch (e) {
+    console.warn('[MappingMemory] IFRS lookup skipped:', e.message);
+  }
 
   const toCreate = [];
   const unmapped = [];
@@ -285,11 +294,13 @@ async function autoMapIFRS(engagementId) {
       });
 
       // Write heuristic hits to memory too
+      try {
       await memoryService.recordMemory({
         firmId, clientId: null, rawText: sg,
         groupName: matched.groupName, subGroupName: sg,
         method, engagementId,
       });
+      } catch (memErr) { console.warn('[MappingMemory] Write skipped:', memErr.message); }
     } else {
       unmapped.push(sg);
     }
@@ -352,11 +363,13 @@ async function saveManualMapping(engagementId, body) {
     const method   = engagement.method;
 
     // Write client-specific memory (highest priority)
+    try {
     await memoryService.recordMemory({
       firmId, clientId, rawText: subGrouping,
       groupName, subGroupName, subGroupNo, noteGroupId, masterGroupingId,
       method, engagementId,
     });
+    } catch (memErr) { console.warn('[MappingMemory] Write skipped:', memErr.message); }
     // recordMemory also auto-writes firm-wide entry — see memoryService
   }
 
