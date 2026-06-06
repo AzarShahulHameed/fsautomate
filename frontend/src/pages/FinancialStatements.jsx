@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
 import { fsAPI } from '../api/client';
@@ -930,21 +931,29 @@ export default function FinancialStatements() {
       const hasLines = sheets && Object.keys(sheets).length > 0;
  
       if (!hasLines) {
-        // Sheets are empty — generation may still be running in background.
-        // Auto-trigger generate and poll until data appears.
+        // Sheets are empty — poll for a few seconds in case background generation
+        // from Mapping page is still running, then show Generate button if still empty
         setLoading(false);
+        // Poll up to 5 times with 1.5s delay before giving up
+        let attempts = 0;
+        const poll = async () => {
+          attempts++;
+          await new Promise(r => setTimeout(r, 1500));
+          try {
+            const pollRes = await fsAPI.get(engagementId);
+            const pollSheets = pollRes.sheets || pollRes;
+            if (pollSheets && Object.keys(pollSheets).length > 0) {
+              setData(pollSheets);
+              setHasPY(pollRes.hasPY || false);
+              return; // done
+            }
+          } catch {}
+          if (attempts < 5) { await poll(); }
+          // After 5 attempts still empty — show Generate button, user clicks manually
+        };
         setGenerating(true);
-        try {
-          const genRes = await fsAPI.generate(engagementId);
-          const genSheets = genRes.sheets || genRes;
-          setData(genSheets);
-          setHasPY(genRes.hasPY || false);
-          if (genRes.errors?.length > 0) toast.error('Generated with issues — check validation');
-        } catch (genErr) {
-          // Generation failed — show empty state with manual button
-          setData(null);
-          setHasPY(false);
-        } finally { setGenerating(false); }
+        await poll();
+        setGenerating(false);
       } else {
         setData(sheets);
         setHasPY(res.hasPY || false);

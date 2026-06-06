@@ -1,11 +1,12 @@
+
 // TaxonomyManager.jsx
 // Drop into: frontend/src/pages/TaxonomyManager.jsx
 // Add as a tab in Settings.jsx (see bottom of this file for integration notes)
-
+ 
 import React, { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
-import { api } from '../api/client';
-
+import api from '../api/client';
+ 
 const taxonomyAPI = {
   list:   (params = {}) => api.get('/taxonomy', { params }),
   gaps:   ()            => api.get('/taxonomy/gaps'),
@@ -14,14 +15,14 @@ const taxonomyAPI = {
   remove: (id)          => api.delete(`/taxonomy/${id}`),
   import: (rows)        => api.post('/taxonomy/import', { rows }),
 };
-
+ 
 // ── Constants ────────────────────────────────────────────────────────────────
 const AL_OPTIONS    = ['Assets','Liabilities','Equity','Income','Expenses'];
 const SHEET_OPTIONS = ['BS','PL'];
 const METHOD_OPTIONS= ['ALL','IND_AS','IFRS','IFRS_SME'];
 const PL_CATS       = ['revenue','otherIncome','cos','selling','admin','depreciation','financeCost','tax','oci'];
 const CNC_OPTIONS   = ['','current','noncurrent'];
-
+ 
 const AL_COLORS = {
   Assets:      'bg-emerald-100 text-emerald-800',
   Liabilities: 'bg-red-100 text-red-800',
@@ -36,12 +37,12 @@ const PL_COLORS = {
   financeCost:'bg-rose-100 text-rose-800', tax:'bg-amber-100 text-amber-800',
   oci:'bg-indigo-100 text-indigo-800',
 };
-
+ 
 // ── Badge component ───────────────────────────────────────────────────────────
 const Badge = ({ label, colorClass }) =>
   label ? <span className={`inline-flex px-2 py-0.5 rounded-full text-xs font-medium ${colorClass}`}>{label}</span>
         : <span className="text-slate-300 text-xs">—</span>;
-
+ 
 // ── Row Modal ─────────────────────────────────────────────────────────────────
 function RowModal({ row, onSave, onClose }) {
   const isEdit = !!row?.id;
@@ -58,9 +59,9 @@ function RowModal({ row, onSave, onClose }) {
     isCashItem:         row?.isCashItem          || false,
   });
   const [saving, setSaving] = useState(false);
-
+ 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }));
-
+ 
   // Auto-set sheet when AL changes
   const handleAL = (v) => {
     set('assetLiability', v);
@@ -70,7 +71,7 @@ function RowModal({ row, onSave, onClose }) {
     if (['Assets','Liabilities'].includes(v)) { set('plCategory',''); }
     if (v === 'Equity') { set('currentNonCurrent',''); set('plCategory',''); }
   };
-
+ 
   const handleSave = async () => {
     if (!form.groupName.trim()) return toast.error('Group name is required');
     if (!form.subGroupNo.trim()) return toast.error('Sub-group No is required');
@@ -83,9 +84,9 @@ function RowModal({ row, onSave, onClose }) {
       toast.error(err?.response?.data?.error || err?.message || 'Save failed');
     } finally { setSaving(false); }
   };
-
+ 
   const isBSRow = ['Assets','Liabilities','Equity'].includes(form.assetLiability);
-
+ 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm">
       <div className="bg-white rounded-2xl shadow-2xl w-[520px] max-w-[95vw] max-h-[90vh] overflow-y-auto">
@@ -93,7 +94,7 @@ function RowModal({ row, onSave, onClose }) {
           <h3 className="font-semibold text-slate-900">{isEdit ? 'Edit taxonomy row' : 'Add taxonomy row'}</h3>
           <button onClick={onClose} className="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
         </div>
-
+ 
         <div className="p-6 space-y-4">
           {/* Group Name */}
           <div>
@@ -108,7 +109,7 @@ function RowModal({ row, onSave, onClose }) {
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
             />
           </div>
-
+ 
           {/* Row identity */}
           <div className="grid grid-cols-2 gap-3">
             <div>
@@ -134,7 +135,7 @@ function RowModal({ row, onSave, onClose }) {
               />
             </div>
           </div>
-
+ 
           {/* Classification */}
           <div className="grid grid-cols-3 gap-3">
             <div>
@@ -159,7 +160,7 @@ function RowModal({ row, onSave, onClose }) {
               </select>
             </div>
           </div>
-
+ 
           {/* Metadata — conditional */}
           <div className="grid grid-cols-2 gap-3">
             {isBSRow && (
@@ -199,7 +200,7 @@ function RowModal({ row, onSave, onClose }) {
               </label>
             </div>
           </div>
-
+ 
           {/* Note Group */}
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">
@@ -213,7 +214,7 @@ function RowModal({ row, onSave, onClose }) {
             />
           </div>
         </div>
-
+ 
         <div className="px-6 py-4 border-t border-slate-100 flex justify-end gap-3">
           <button onClick={onClose}
             className="px-4 py-2 text-sm text-slate-600 hover:text-slate-900">Cancel</button>
@@ -226,7 +227,7 @@ function RowModal({ row, onSave, onClose }) {
     </div>
   );
 }
-
+ 
 // ── Main TaxonomyManager Component ───────────────────────────────────────────
 export default function TaxonomyManager() {
   const [rows,    setRows]    = useState([]);
@@ -236,13 +237,13 @@ export default function TaxonomyManager() {
   const [tab,     setTab]     = useState('browse'); // browse | gaps | import
   const [modal,   setModal]   = useState(null);     // null | 'add' | rowObj
   const [deleting,setDeleting]= useState(null);
-
+ 
   // Filters
   const [search, setSearch]   = useState('');
   const [fMethod, setFMethod] = useState('');
   const [fAL,     setFAL]     = useState('');
   const [fSheet,  setFSheet]  = useState('');
-
+ 
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -257,9 +258,9 @@ export default function TaxonomyManager() {
       toast.error('Failed to load taxonomy');
     } finally { setLoading(false); }
   }, [fMethod, fSheet, search]);
-
+ 
   useEffect(() => { load(); }, [load]);
-
+ 
   const handleDelete = async (row) => {
     if (!window.confirm(`Deactivate "${row.groupName}"? Existing mappings will not be affected.`)) return;
     setDeleting(row.id);
@@ -270,7 +271,7 @@ export default function TaxonomyManager() {
     } catch { toast.error('Failed to deactivate'); }
     finally { setDeleting(null); }
   };
-
+ 
   const handlePromoteGap = (gap) => {
     setModal({
       groupName: gap.groupName,
@@ -282,10 +283,10 @@ export default function TaxonomyManager() {
     });
     setTab('browse');
   };
-
+ 
   // Apply client-side AL filter
   const displayed = fAL ? rows.filter(r => r.assetLiability === fAL) : rows;
-
+ 
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -302,7 +303,7 @@ export default function TaxonomyManager() {
           + Add row
         </button>
       </div>
-
+ 
       {/* Stats */}
       <div className="grid grid-cols-4 gap-3">
         {[
@@ -317,7 +318,7 @@ export default function TaxonomyManager() {
           </div>
         ))}
       </div>
-
+ 
       {/* Gap warning */}
       {gaps.length > 0 && (
         <div className="bg-amber-50 border border-amber-200 rounded-xl px-4 py-3 text-sm text-amber-800 flex items-start gap-2">
@@ -330,7 +331,7 @@ export default function TaxonomyManager() {
           </span>
         </div>
       )}
-
+ 
       {/* Tabs */}
       <div className="border-b border-slate-200 flex gap-6 text-sm">
         {[
@@ -348,7 +349,7 @@ export default function TaxonomyManager() {
           </button>
         ))}
       </div>
-
+ 
       {/* ── BROWSE TAB ── */}
       {tab === 'browse' && (
         <div className="space-y-3">
@@ -374,7 +375,7 @@ export default function TaxonomyManager() {
               <option value="PL">PL only</option>
             </select>
           </div>
-
+ 
           {/* Table */}
           <div className="border border-slate-200 rounded-xl overflow-hidden">
             <table className="w-full text-sm">
@@ -445,7 +446,7 @@ export default function TaxonomyManager() {
           </p>
         </div>
       )}
-
+ 
       {/* ── GAPS TAB ── */}
       {tab === 'gaps' && (
         <div className="space-y-3">
@@ -487,7 +488,7 @@ export default function TaxonomyManager() {
           )}
         </div>
       )}
-
+ 
       {/* ── IMPORT TAB ── */}
       {tab === 'import' && (
         <div className="space-y-5">
@@ -504,7 +505,7 @@ export default function TaxonomyManager() {
               Coming in next sprint — use the SQL import for now.
             </p>
           </div>
-
+ 
           <div>
             <p className="text-sm font-medium text-slate-700 mb-2">Export current taxonomy</p>
             <button
@@ -529,7 +530,7 @@ export default function TaxonomyManager() {
               ↓ Download taxonomy CSV
             </button>
           </div>
-
+ 
           <div>
             <p className="text-sm font-medium text-slate-700 mb-2">Import rules</p>
             <ul className="text-xs text-slate-500 space-y-1 list-disc list-inside">
@@ -545,7 +546,7 @@ export default function TaxonomyManager() {
           </div>
         </div>
       )}
-
+ 
       {/* Modal */}
       {modal && (
         <RowModal
@@ -557,28 +558,28 @@ export default function TaxonomyManager() {
     </div>
   );
 }
-
+ 
 /*
 ── INTEGRATION INTO Settings.jsx ─────────────────────────────────────────────
-
+ 
 1. Import at top of Settings.jsx:
    import TaxonomyManager from './TaxonomyManager';
-
+ 
 2. Add to TABS array (only show for FIRM_ADMIN):
    { key:'taxonomy', label:'🗂 Taxonomy', adminOnly: true },
-
+ 
 3. Add tab rendering (after billing tab block):
    {activeTab === 'taxonomy' && (
      <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
        <TaxonomyManager />
      </div>
    )}
-
+ 
 4. Filter tabs by role in the sidebar (TABS.filter):
    {TABS.filter(t => !t.adminOnly || user?.role === 'FIRM_ADMIN').map(...)}
-
+ 
 5. Add to server.js:
    const taxonomyRoutes = require('./src/routes/taxonomy.routes');
    app.use('/api/taxonomy', taxonomyRoutes);
-
+ 
 ─────────────────────────────────────────────────────────────────────────────*/
