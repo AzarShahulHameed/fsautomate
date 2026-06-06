@@ -102,60 +102,14 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
   const isShortTerm = n => n.includes('short term') || n.includes('short-term');
   const isLongTerm  = n => (n.includes('long term') || n.includes('long-term')) && !isShortTerm(n);
 
-  const NCA_KEYWORDS = [
-    'property, plant','property plant','plant and equipment','plant & equipment',
-    'fixed asset','tangible asset','ppe','freehold','leasehold improvement',
-    'land','building','furniture','fixture','vehicle','motor car','motor vehicle',
-    'plant and machinery','machinery','equipment','computer','office equipment',
-    'electrical installation','air condition',
-    'right-of-use','right of use','rou asset','lease right',
-    'intangible','goodwill','software','trademark','patent','brand','copyright',
-    'customer relationship','license','franchise',
-    'capital work in progress','capital wip','cwip','capital work-in-progress',
-    'construction in progress','asset under construction',
-    'non-current investment','non current investment',
-    'long term investment','long-term investment',
-    'investment in subsidiary','investment in associate',
-    'investment in joint venture','investment in partnership',
-    'investment in equity','quoted investment','unquoted investment',
-    'investment in mutual fund','investment in bond','investment in debenture',
-    'investment in preference share','investment in share',
-    'investment in llp','investment in trust',
-    'deferred tax asset',
-    'security deposit','earnest money','retention money',
-    'capital advance','advance for capital','advance against capital',
-    'other non-current asset','other non current asset',
-    'non-current asset','non current asset',
-    'long term loans and advance','long-term loans and advance',
-    'long term loan and advance','long-term loan and advance',
-  ];
+  // BS sub-section classification — reads currentNonCurrent from FSLine (set by MasterGrouping)
+  // Zero keyword matching. If currentNonCurrent is null (custom item), defaults to noncurrent.
+  const isNC = l => l.currentNonCurrent === 'noncurrent' || l.currentNonCurrent === null;
+  const isCA = l => l.currentNonCurrent === 'current';
 
-  const CA_KEYWORDS = [
-    'inventor','stock','raw material','work in progress','work-in-progress','wip stock',
-    'finished good','packing material','stores and spare','consumable','merchandise',
-    'trade receivable','trade and other receivable','account receivable',
-    'sundry debtor','debtor','bill receivable','note receivable',
-    'cash in hand','cash in bank','cash at bank','cash and bank','cash and cash equivalent',
-    'bank balance','petty cash','cheque in hand','demand deposit',
-    'current investment','short term investment','short-term investment',
-    'liquid fund','treasury bill','commercial paper',
-    'short term loans and advance','short-term loans and advance',
-    'short term loan and advance','short-term loan and advance',
-    'loans and advance','loan and advance',
-    'advance to supplier','advance to vendor','advance paid','advance given',
-    'advance to employee','advance to staff','prepaid expense','prepayment',
-    'other receivable','other current asset','other asset',
-    'accrued income','income receivable','interest receivable','dividend receivable',
-    'due from','receivable from',
-    'vat receivable','gst receivable','input tax credit','input gst',
-    'income tax receivable','tax refund receivable','advance tax','tds receivable',
-    'provision for bad debt','provision for doubtful debt',
-    'export incentive receivable','subsidy receivable',
-  ];
-
-  const ncAssets    = assets.filter(l => { const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return false; if(isLongTerm(n)) return true; if(NCA_KEYWORDS.some(k=>n.includes(k))) return true; if(n.includes('investment')&&!n.includes('current invest')&&!n.includes('short term invest')&&!n.includes('short-term invest')&&!isShortTerm(n)) return true; return false; });
-  const cAssets     = assets.filter(l => { const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return true; if(isLongTerm(n)) return false; if(NCA_KEYWORDS.some(k=>n.includes(k))) return false; if(n.includes('investment')&&!n.includes('current invest')&&!n.includes('short term invest')&&!n.includes('short-term invest')&&!isShortTerm(n)) return false; return CA_KEYWORDS.some(k=>n.includes(k)); });
-  const otherAssets = assets.filter(l => { const n=l.groupName?.toLowerCase()||''; if(isShortTerm(n)) return false; if(isLongTerm(n)) return false; if(NCA_KEYWORDS.some(k=>n.includes(k))) return false; if(CA_KEYWORDS.some(k=>n.includes(k))) return false; if(n.includes('investment')&&!n.includes('current invest')&&!isShortTerm(n)) return false; return true; });
+  const ncAssets    = assets.filter(l => isNC(l));
+  const cAssets     = assets.filter(l => isCA(l));
+  const otherAssets = []; // all assets now classified explicitly
 
   const NCL_KEYWORDS = ['long term borrowing','long-term borrowing','non-current borrowing','term loan','debenture','bond','note payable long','loan from bank','loan from financial institution','loan from nbfc','foreign currency loan','ecb','external commercial borrowing','lease liabilit','finance lease','right-of-use liab','provision for gratuity','gratuity liabilit','pension liabilit','post employment benefit','defined benefit','employee benefit liabilit','compensated absence','leave encashment liabilit','deferred tax liabilit','deferred tax liab','other non-current liabilit','other long term liabilit','non-current liabilit','security deposit received','deferred revenue long','deferred income long','loan from related party long','loan from director long'];
   const CL_KEYWORDS  = ['trade payable','trade and other payable','account payable','sundry creditor','creditor','bill payable','note payable','short term borrowing','short-term borrowing','working capital loan','cash credit','bank overdraft','overdraft','packing credit','loan repayable','current maturit','installment due','other payable','other current liabilit','accrued expense','accrual','statutory due','statutory liabilit','advance from customer','advance received','customer deposit','deferred revenue','deferred income','unclaimed dividend','unpaid dividend','dividend payable','vat payable','gst payable','tax payable','income tax payable','tds payable','service tax payable','duties and tax','provision for tax','provision for income tax','salary payable','wages payable','employee payable','pf payable','esic payable','pt payable','directors loan','director loan','due to director','loan from shareholder','shareholder loan','due to related','due to subsidiary','due to associate','short term provision','provision for expense','provision for audit','provision for warranty','proposed dividend'];
@@ -290,10 +244,10 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
   const isExpense = l => l.assetLiability === 'Expenses';
 
   // ── Revenue classification ────────────────────────────────────────────────
-  const revenueKW      = ['revenue from operations','revenue from contracts','revenue from contract',
-                          'turnover','sales','income from operations'];
-  const revenueLines   = plLines.filter(l => isIncome(l) && revenueKW.some(k=>l.groupName?.toLowerCase().includes(k)));
-  const otherIncomeLines = plLines.filter(l => isIncome(l) && !revenueKW.some(k=>l.groupName?.toLowerCase().includes(k)));
+  // P&L classification — reads plCategory from FSLine (set by MasterGrouping)
+  // Zero keyword matching anywhere.
+  const revenueLines     = plLines.filter(l => l.plCategory === 'revenue');
+  const otherIncomeLines = plLines.filter(l => l.plCategory === 'otherIncome');
 
   // ── Expense classification ────────────────────────────────────────────────
   const cosKW      = ['cost of sale','cost of good','cost of material','cost of revenue',
@@ -304,17 +258,12 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
     return cosKW.some(k=>n.includes(k)) || n==='purchases' || n==='purchase';
   })());
 
-  const finCostKW    = ['finance cost','interest expense','bank charge','bank interest','borrowing cost','finance charges'];
-  const finCostLines = plLines.filter(l => isExpense(l) && finCostKW.some(k=>l.groupName?.toLowerCase().includes(k)));
+  const finCostLines  = plLines.filter(l => l.plCategory === 'financeCost');
 
-  const deprKW    = ['depreciation','amortis','amortiz'];
-  const deprLines = plLines.filter(l => isExpense(l) && deprKW.some(k=>l.groupName?.toLowerCase().includes(k)));
+  const deprLines     = plLines.filter(l => l.plCategory === 'depreciation');
 
   const taxKW    = ['tax expense','income tax expense','current tax','deferred tax expense','provision for tax','tax expense:'];
-  const taxLines = plLines.filter(l => isExpense(l) && taxKW.some(k=>l.groupName?.toLowerCase().includes(k)));
-
-  const exceptKW    = ['exceptional'];
-  const exceptLines = plLines.filter(l => isExpense(l) && exceptKW.some(k=>l.groupName?.toLowerCase().includes(k)));
+  const taxLines      = plLines.filter(l => l.plCategory === 'tax');se(l) && exceptKW.some(k=>l.groupName?.toLowerCase().includes(k));
 
   // AS/Ind AS: all non-cos, non-finance, non-depr, non-tax expenses are "other expenses by nature"
   // IFRS: split into selling/admin
@@ -604,34 +553,30 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
   const totalExpense = expenseLines.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const pbt          = totalIncome - totalExpense;
 
-  const deprKW     = ['depreciation','amortis','amortiz'];
-  const finCostKW  = ['finance cost','interest expense','bank charge','borrowing cost'];
-  const cashKW     = ['cash','bank'];
-  const depr       = expenseLines.filter(l=>deprKW.some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
-  const finCost    = expenseLines.filter(l=>finCostKW.some(k=>l.groupName?.toLowerCase().includes(k))).reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
-  const cash       = bsLines.filter(l=>cashKW.some(k=>l.groupName?.toLowerCase().includes(k))&&l.assetLiability==='Assets').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+  // CFS reads plCategory and isCashItem — zero keyword matching
+  const depr     = expenseLines.filter(l=>l.plCategory==='depreciation').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+  const finCost  = expenseLines.filter(l=>l.plCategory==='financeCost').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+  const cash     = bsLines.filter(l=>l.isCashItem===true&&l.assetLiability==='Assets').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
 
   // ── Working capital changes (indirect method) ─────────────────────────────
   // Formula: (PY balance - CY balance) for current assets, (CY balance - PY balance) for current liabilities
   // Increase in CA = use of cash (negative); Decrease in CA = source of cash (positive)
   // Increase in CL = source of cash (positive); Decrease in CL = use of cash (negative)
-  const currentAssetKW = ['inventor','stock','trade receivable','debtor','receivable','prepaid','advance to','other current asset','short term loan'];
-  const currentLiabKW  = ['trade payable','creditor','other current liab','accrued','advance from','short term provision','duties'];
+  // Working capital: uses currentNonCurrent field — no keyword matching
 
   let workingCapitalChanges  = 0;
   const wcItems = [];
 
   if (hasPY) {
     for (const cyLine of bsLines) {
-      const n   = (cyLine.groupName||'').toLowerCase();
       const cyAmt = Number(cyLine.totalFinalNet||0);
       const pyAmt = Number(cyLine.pyAmount||0);
 
-      if (currentAssetKW.some(k=>n.includes(k)) && cyLine.assetLiability==='Assets') {
+      if (cyLine.currentNonCurrent === 'current' && cyLine.assetLiability==='Assets' && !cyLine.isCashItem) {
         const change = pyAmt - cyAmt; // decrease in CA = positive cash flow
         workingCapitalChanges += change;
         if (Math.abs(change) > 0.01) wcItems.push({ label: `(Increase)/Decrease in ${cyLine.groupName}`, amount: change });
-      } else if (currentLiabKW.some(k=>n.includes(k)) && cyLine.assetLiability==='Liabilities') {
+      } else if (cyLine.currentNonCurrent === 'current' && cyLine.assetLiability==='Liabilities') {
         const change = cyAmt - pyAmt; // increase in CL = positive cash flow
         workingCapitalChanges += change;
         if (Math.abs(change) > 0.01) wcItems.push({ label: `Increase/(Decrease) in ${cyLine.groupName}`, amount: change });
@@ -641,10 +586,58 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
 
   const operatingCashBeforeTax = pbt + depr + finCost + workingCapitalChanges;
   const openingCash = hasPY
-    ? bsLines.filter(l=>cashKW.some(k=>l.groupName?.toLowerCase().includes(k))&&l.assetLiability==='Assets').reduce((s,l)=>s+Number(l.pyAmount||0),0)
+    ? bsLines.filter(l=>l.isCashItem===true&&l.assetLiability==='Assets').reduce((s,l)=>s+Number(l.pyAmount||0),0)
     : 0;
-  const netOperating = operatingCashBeforeTax;
-  const netChange    = netOperating - finCost;
+
+  // ── Investing: PPE movements from BS (CY - PY = net capex) ────────────────
+  // CFS investing: uses currentNonCurrent field — all noncurrent assets are capex candidates
+
+  let netCapex    = 0;
+  let netInvest   = 0;
+  const capexItems = [];
+  const investItems = [];
+
+  if (hasPY) {
+    for (const cyLine of bsLines) {
+      const n = (cyLine.groupName||'').toLowerCase();
+      const cyAmt = Number(cyLine.totalFinalNet||0);
+      const pyAmt = Number(cyLine.pyAmount||0);
+      if (cyLine.assetLiability === 'Assets') {
+        if (cyLine.currentNonCurrent === 'noncurrent' && !cyLine.isCashItem) {
+          const movement = -(cyAmt - pyAmt); // increase in asset = cash outflow
+          netCapex += movement;
+          if (Math.abs(movement) > 0.01) capexItems.push({ label: cyLine.groupName, amount: movement });
+        } else if (false) { // merged into noncurrent branch above
+          const movement = -(cyAmt - pyAmt);
+          netInvest += movement;
+          if (Math.abs(movement) > 0.01) investItems.push({ label: `Purchase/Sale of ${cyLine.groupName}`, amount: movement });
+        }
+      }
+    }
+  }
+  const netInvesting = hasPY ? (netCapex + netInvest) : 0;
+
+  // ── Financing: Borrowing movements + finance costs paid ───────────────────
+  // CFS financing: uses currentNonCurrent — noncurrent liabilities are borrowings
+  let netBorrowing = 0;
+  const borrowItems = [];
+
+  if (hasPY) {
+    for (const cyLine of bsLines) {
+      const n = (cyLine.groupName||'').toLowerCase();
+      if (cyLine.assetLiability === 'Liabilities' && cyLine.currentNonCurrent === 'noncurrent') {
+        const movement = Number(cyLine.totalFinalNet||0) - Number(cyLine.pyAmount||0);
+        netBorrowing += movement;
+        if (Math.abs(movement) > 0.01) borrowItems.push({ label: cyLine.groupName, amount: movement });
+      }
+    }
+  }
+  const netFinancing = netBorrowing - finCost;
+
+  // Net change = Operating + Investing + Financing
+  // Operating = operatingCashBeforeTax - taxPaid (we use pbt as before-tax approximation)
+  const netOperating = operatingCashBeforeTax - finCost; // subtract finCost (paid in financing)
+  const netChange    = netOperating + netInvesting + netFinancing;
 
   const CRow = ({label, amount, bold, indent, sub}) => (
     <tr className={`${bold?'border-t-2 border-slate-500 bg-slate-50':'border-b border-slate-100 hover:bg-blue-50'}`}>
@@ -691,12 +684,18 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
           </>}
           <CRow label="Net Cash from Operating Activities (A)" amount={netOperating - finCost} bold />
           <SH label="B. Cash Flow from Investing Activities" />
-          <CRow label="Purchase of Property, Plant and Equipment" amount={0} indent />
-          <CRow label="Net Cash from Investing Activities (B)" amount={0} bold />
+          {hasPY ? <>
+            {capexItems.map((it,i)=><CRow key={i} label={it.label} amount={it.amount} indent={2} sub />)}
+            {investItems.map((it,i)=><CRow key={i} label={it.label} amount={it.amount} indent={2} sub />)}
+            {(capexItems.length===0&&investItems.length===0) && <CRow label="No movement in NCA" amount={0} indent sub />}
+          </> : <CRow label="Upload prior year TB for investing activities" amount={0} indent sub />}
+          <CRow label="Net Cash from Investing Activities (B)" amount={netInvesting} bold />
           <SH label="C. Cash Flow from Financing Activities" />
-          <CRow label="Proceeds from / (Repayment of) Borrowings" amount={0} indent />
-          <CRow label="Finance Costs Paid" amount={-finCost} indent />
-          <CRow label="Net Cash from Financing Activities (C)" amount={-finCost} bold />
+          {hasPY ? <>
+            {borrowItems.map((it,i)=><CRow key={i} label={it.label} amount={it.amount} indent={2} sub />)}
+          </> : <CRow label="Upload prior year TB for financing activities" amount={0} indent sub />}
+          <CRow label="Finance Costs Paid" amount={-finCost} indent={2} sub />
+          <CRow label="Net Cash from Financing Activities (C)" amount={netFinancing} bold />
           <tr className="border-t-2 border-slate-700 bg-slate-50">
             <td className="px-3 py-3 font-bold text-slate-900 text-sm">Net Change in Cash and Cash Equivalents (A+B+C)</td>
             <td className="px-3 py-3 text-right font-mono font-bold">{fmt(netChange,D,locale)}</td>

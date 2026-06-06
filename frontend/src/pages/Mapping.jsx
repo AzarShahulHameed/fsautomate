@@ -249,11 +249,13 @@ export default function Mapping() {
     setGenerating(true);
     try {
       await fsAPI.generate(engagementId);
-      await notesAPI.generate(engagementId);
-      toast.success('Financial statements and notes generated!');
+      toast.success('Financial statements generated!');
+      // Generate notes in background — don't block navigation if it fails
+      notesAPI.generate(engagementId).catch(() => {});
       navigate(`/engagements/${engagementId}/fs`);
-    } catch (err) { toast.error(err?.error || 'Generation failed'); }
-    finally { setGenerating(false); }
+    } catch (err) {
+      toast.error(err?.error || err?.message || 'Generation failed — check mappings');
+    } finally { setGenerating(false); }
   }
 
   // Aggregate TB rows by subGrouping

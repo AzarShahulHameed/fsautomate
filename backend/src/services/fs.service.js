@@ -163,30 +163,42 @@ function aggregateTBRows(tbRows, mappingIndex, method, masterIndex = new Map()) 
       continue;
     }
 
-    // Priority 1: read classification from MasterGrouping (authoritative DB source)
-    // Priority 2: keyword-based classify() as fallback
-    let al, sheet;
+    // Classification: read directly from MasterGrouping (zero keyword hardcoding)
+    // MasterGrouping is the single source of truth — every field is set in reference data.
+    // classify() is only used as a last-resort fallback for custom groupNames not in master.
     const masterRow = mapping.masterGroupingId ? masterIndex.get(mapping.masterGroupingId) : null;
+    let al, sheet, currentNonCurrent, plCategory, isCashItem;
+
     if (masterRow?.assetLiability && masterRow?.sheet) {
-      al    = masterRow.assetLiability;
-      sheet = masterRow.sheet;
+      al                = masterRow.assetLiability;
+      sheet             = masterRow.sheet;
+      currentNonCurrent = masterRow.currentNonCurrent || null;
+      plCategory        = masterRow.plCategory        || null;
+      isCashItem        = masterRow.isCashItem        || false;
     } else {
-      const classified = classify(mapping.groupName, method);
-      al    = classified.al;
-      sheet = classified.sheet;
+      // Fallback: keyword classify() for custom groupNames not in master
+      const classified  = classify(mapping.groupName, method);
+      al                = classified.al;
+      sheet             = classified.sheet;
+      currentNonCurrent = null;
+      plCategory        = null;
+      isCashItem        = false;
     }
 
     const rawNet = Number(row.finalNet || 0);
 
     if (!aggregates.has(mapping.groupName)) {
       aggregates.set(mapping.groupName, {
-        groupName:      mapping.groupName,
-        totalRawNet:    0,
-        noteGroupId:    mapping.noteGroupId || null,
+        groupName:        mapping.groupName,
+        totalRawNet:      0,
+        noteGroupId:      mapping.noteGroupId || null,
         sheet,
-        assetLiability: al,
-        displayOrder:   mapping.displayOrder ?? null,
-        rows:           [],
+        assetLiability:   al,
+        displayOrder:     mapping.displayOrder ?? null,
+        currentNonCurrent,
+        plCategory,
+        isCashItem,
+        rows:             [],
       });
     }
     const agg = aggregates.get(mapping.groupName);
@@ -270,7 +282,11 @@ async function generateFS(engagementId, firmId) {
   if (masterGroupingIds.length > 0) {
     const masterRows = await prisma.masterGrouping.findMany({
       where: { id: { in: masterGroupingIds } },
-      select: { id: true, assetLiability: true, sheet: true, displayOrder: true, noteGroupId: true },
+      select: {
+        id: true, assetLiability: true, sheet: true,
+        displayOrder: true, noteGroupId: true,
+        currentNonCurrent: true, plCategory: true, isCashItem: true,
+      },
     });
     masterIndex = new Map(masterRows.map(r => [r.id, r]));
   }
@@ -423,14 +439,17 @@ async function generateFS(engagementId, firmId) {
   let order = 0;
   const cyLineRows = sortedCYAggs.map(agg => ({
     engagementId,
-    tbVersionId:    latestCY.id,
-    sheet:          agg.sheet,
-    groupName:      agg.groupName,
-    totalFinalNet:  agg.totalFinalNet,
-    noteGroupId:    agg.noteGroupId || null,
-    displayOrder:   ++order,
-    assetLiability: agg.assetLiability,
-    isPriorYear:    false,
+    tbVersionId:      latestCY.id,
+    sheet:            agg.sheet,
+    groupName:        agg.groupName,
+    totalFinalNet:    agg.totalFinalNet,
+    noteGroupId:      agg.noteGroupId || null,
+    displayOrder:     ++order,
+    assetLiability:   agg.assetLiability,
+    isPriorYear:      false,
+    currentNonCurrent: agg.currentNonCurrent || null,
+    plCategory:       agg.plCategory || null,
+    isCashItem:       agg.isCashItem || false,
   }));
   try {
     await prisma.fSLine.createMany({ data: cyLineRows, skipDuplicates: true });
