@@ -3,6 +3,7 @@ import { useStore } from '../store';
 import { authAPI, uploadAPI, prefsAPI } from '../api/client';
 import api from '../api/client';
 import toast from 'react-hot-toast';
+import TaxonomyManager from './TaxonomyManager';
 
 function Avatar({ user, size = 'xl' }) {
   const s = size === 'xl' ? 'w-24 h-24 text-3xl' : 'w-10 h-10 text-base';
@@ -50,6 +51,7 @@ const TABS = [
   { key:'preferences', label:'⚙️ Preferences'   },
   { key:'security',    label:'🔒 Security'       },
   { key:'billing',     label:'💳 Plan & Billing' },
+  { key:'taxonomy',    label:'🗂 Taxonomy',   adminOnly: true },
 ];
 
 // ── SessionManager Component ──────────────────────────────────────────────────
@@ -517,7 +519,7 @@ export default function Settings() {
         {/* Sidebar */}
         <div className="lg:w-56 flex-shrink-0 space-y-4">
           <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-2">
-            {TABS.map(t => (
+            {TABS.filter(t => !t.adminOnly || user?.role === 'FIRM_ADMIN').map(t => (
               <button key={t.key} onClick={() => setActiveTab(t.key)}
                 className={`w-full flex items-center gap-3 px-4 py-2.5 rounded-xl text-sm font-medium transition-all text-left ${
                   activeTab === t.key ? 'bg-indigo-600 text-white shadow-md' : 'text-slate-600 hover:bg-slate-50'
@@ -875,6 +877,12 @@ export default function Settings() {
           {activeTab === 'billing' && (<>
             <BillingTab firmId={firm?.id} currency={firm?.currency || 'INR'} />
           </>)}
+
+          {activeTab === 'taxonomy' && (
+            <div className="bg-white rounded-2xl border border-slate-200 shadow-sm p-6">
+              <TaxonomyManager />
+            </div>
+          )}
 
           {activeTab === '__placeholder__' && (<>
             <Section title="Current Plan">
