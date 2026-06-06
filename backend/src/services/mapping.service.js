@@ -93,8 +93,16 @@ async function autoMapFromMaster(engagementId, method) {
   if (subGroupings.length === 0) return { mapped: 0, unmapped: [] };
 
   // ── Step 1: Check MappingMemory first ──────────────────────────────────────
-  const { autoMapped: memAutoMapped, suggested: memSuggested, stillUnmapped } =
-    await memoryService.applyMemoryToUnmapped(subGroupings, firmId, clientId, method);
+  // Safe: MappingMemory table may not exist if migration hasn't been run yet
+  let memAutoMapped = [], memSuggested = [], stillUnmapped = [...subGroupings];
+  try {
+    const memResult = await memoryService.applyMemoryToUnmapped(subGroupings, firmId, clientId, method);
+    memAutoMapped = memResult.autoMapped;
+    memSuggested  = memResult.suggested;
+    stillUnmapped = memResult.stillUnmapped;
+  } catch (e) {
+    console.warn('[MappingMemory] Lookup skipped:', e.message);
+  }
 
   const toCreate = [];
   const unmapped = [];
@@ -329,6 +337,8 @@ async function saveManualMapping(engagementId, body) {
     create: { engagementId, subGrouping, groupName, subGroupName, subGroupNo, noteGroupId, masterGroupingId, isManual: true, isSaved: true },
   });
 
+  // ── Write to MappingMemory (safe) ──────────────────────────────────────────
+  try {
   // ── Write to MappingMemory ─────────────────────────────────────────────────
   // Get engagement context
   const engagement = await prisma.engagement.findUnique({
@@ -351,11 +361,10 @@ async function saveManualMapping(engagementId, body) {
   }
 
   return mapping;
+  } catch (e) {
+    console.warn('[MappingMemory] Write skipped:', e.message);
+  }
 }
-
-/**
- * Get all mappings for an engagement (including unmapped TB subGroupings)
- */
 async function getMappingStatus(engagementId) {
   const [mappings, latest] = await Promise.all([
     prisma.mapping.findMany({ where: { engagementId }, orderBy: { groupName: 'asc' } }),
