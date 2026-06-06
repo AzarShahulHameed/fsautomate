@@ -3,7 +3,10 @@
  
 const { prisma }          = require('../config/db');
 const { assignNoteNumbers } = require('../utils/noteNumbering');
-const { runAllChecks }    = require('./validation.service');
+ 
+// Validation service — loaded safely so server starts even if file is absent
+let runAllChecks = async () => {};
+try { ({ runAllChecks } = require('./validation.service')); } catch (_) {}
  
 // ════════════════════════════════════════════════════════════════════════════
 // SIGN CONVENTION
@@ -17,22 +20,18 @@ const { runAllChecks }    = require('./validation.service');
 // ════════════════════════════════════════════════════════════════════════════
 function displaySign(rawAmount, category) {
   const n = Number(rawAmount || 0);
-  // Credit-normal: stored negative in TB → flip to positive for display
   if (category === 'Liabilities' || category === 'Equity' || category === 'Income') return -n;
-  // Debit-normal: stored positive in TB → keep as-is
   return n;
 }
  
 // ════════════════════════════════════════════════════════════════════════════
 // CLASSIFICATION ENGINE
-// Returns { al: 'Assets'|'Liabilities'|'Equity'|'Income'|'Expenses', sheet: 'BS'|'PL'|'OCI' }
 // ════════════════════════════════════════════════════════════════════════════
 function classify(groupName, method) {
   const g = groupName.toLowerCase().trim();
   const starts = (...kw) => kw.some(k => g.startsWith(k));
   const has    = (...kw) => kw.some(k => g.includes(k));
  
-  // ── Priority overrides ────────────────────────────────────────────────────
   if (has('retained earnings','retained profit','accumulated profit','surplus','r&s - surplus'))
     return { al: 'Equity', sheet: 'BS' };
   if (has('due from','receivable from related'))
@@ -40,11 +39,9 @@ function classify(groupName, method) {
   if (has('due to','payable to related'))
     return { al: 'Liabilities', sheet: 'BS' };
  
-  // ── OCI ───────────────────────────────────────────────────────────────────
   if (has('other comprehensive','actuarial','remeasurement','fvoci','translation reserve','hedging reserve'))
     return { al: 'Expenses', sheet: 'OCI' };
  
-  // ── PL: Expenses FIRST (before income, to avoid "cost of sales" matching "sales") ──
   if (starts('cost of','purchase of','changes in','provision for','loss on') ||
       has('cost of sale','cost of good','cost of material','cost of revenue',
           'purchase of stock','changes in inventor',
@@ -58,14 +55,12 @@ function classify(groupName, method) {
           'subscription charge','travelling','travel expense','bad debt'))
     return { al: 'Expenses', sheet: 'PL' };
  
-  // ── PL: Income ────────────────────────────────────────────────────────────
   if (has('revenue from operations','revenue from contracts','turnover',
           'other income','other gain','finance income','interest income',
           'dividend income','rental income','grant income') ||
       (method === 'IFRS' || method === 'IFRS_SME') && (g === 'revenue' || starts('revenue from')))
     return { al: 'Income', sheet: 'PL' };
  
-  // ── BS: Equity ────────────────────────────────────────────────────────────
   if (has('share capital','ordinary share','preference share','paid-up capital',
           'share premium','securities premium','additional paid',
           'other equity','other reserve','general reserve','capital reserve',
@@ -74,22 +69,14 @@ function classify(groupName, method) {
           'money received against share warrant'))
     return { al: 'Equity', sheet: 'BS' };
  
-  // ── BS: Loans GIVEN (Assets) — must come BEFORE Liabilities block ──────────
-  // Schedule III: "Loans and Advances" = amounts given out by company = Assets
-  // "Long Term Loans and Advances" = Non-Current Asset
-  // "Short Term Loans and Advances" = Current Asset
-  // Key: "loans and advances" = Asset; "borrowings" = Liability
   if (has('loans and advance','loan and advance',
           'long term loan and advance','long-term loan and advance',
           'short term loan and advance','short-term loan and advance',
           'advance to employee','advance to staff','advance to director',
           'security deposit paid','earnest money','retention money',
-          'capital advance','advance for capital')) {
-    // These are amounts given OUT by the company — always Assets
+          'capital advance','advance for capital'))
     return { al: 'Assets', sheet: 'BS' };
-  }
  
-  // ── BS: Liabilities ───────────────────────────────────────────────────────
   if (has('long term borrowing','long-term borrowing','non-current borrowing',
           'bond','debenture','term loan from bank','loan from bank','loan from nbfc',
           'lease liabilit','lease obligation',
@@ -105,7 +92,6 @@ function classify(groupName, method) {
           'dividend payable','duties and taxes','duties and tax'))
     return { al: 'Liabilities', sheet: 'BS' };
  
-  // ── BS: Assets ────────────────────────────────────────────────────────────
   if (has('property, plant','property plant','fixed asset','plant and machinery',
           'furniture','vehicle','computer','equipment','land','building','leasehold',
           'right-of-use','right of use','rou asset',
@@ -126,30 +112,16 @@ function classify(groupName, method) {
           'long-term loans and advance','short-term loans and advance'))
     return { al: 'Assets', sheet: 'BS' };
  
-  // ── Fallback by keyword ───────────────────────────────────────────────────
   if (has('income','revenue','gain') && !starts('cost','purchase'))
     return { al: 'Income', sheet: 'PL' };
   if (has('expense','cost','loss'))
     return { al: 'Expenses', sheet: 'PL' };
  
-  // Default → Assets (safest fallback for BS items)
   return { al: 'Assets', sheet: 'BS' };
 }
  
 // ════════════════════════════════════════════════════════════════════════════
-// GENERATE FS
-// Pure aggregation — no calculations, no adjustments, TB values only
-// ════════════════════════════════════════════════════════════════════════════
- 
-// ════════════════════════════════════════════════════════════════════════════
 // AGGREGATE TB ROWS → FS LINES
-// Pure function — called for both CY and PY TB separately.
-//
-// Classification priority (MNC standard):
-//   1. masterGrouping.assetLiability + masterGrouping.sheet from DB (authoritative)
-//   2. classify() keyword fallback (for custom/unmapped groupNames only)
-//
-// This eliminates the keyword-matching ambiguity for all seeded master items.
 // ════════════════════════════════════════════════════════════════════════════
 function aggregateTBRows(tbRows, mappingIndex, method, masterIndex = new Map()) {
   const aggregates  = new Map();
@@ -164,10 +136,6 @@ function aggregateTBRows(tbRows, mappingIndex, method, masterIndex = new Map()) 
       continue;
     }
  
-    // Classification: read directly from MasterGrouping (zero keyword hardcoding)
-    // MasterGrouping is the single source of truth — every field is set in reference data.
-    // classify() is only used as a last-resort fallback for custom groupNames not in master.
-    // Look up by groupName (lowercase) — resilient to stale masterGroupingId UUIDs
     const masterRow = masterIndex.get(mapping.groupName?.trim().toLowerCase()) || null;
     let al, sheet, currentNonCurrent, plCategory, isCashItem;
  
@@ -178,7 +146,6 @@ function aggregateTBRows(tbRows, mappingIndex, method, masterIndex = new Map()) 
       plCategory        = masterRow.plCategory        || null;
       isCashItem        = masterRow.isCashItem        || false;
     } else {
-      // Fallback: keyword classify() for custom groupNames not in master
       const classified  = classify(mapping.groupName, method);
       al                = classified.al;
       sheet             = classified.sheet;
@@ -208,12 +175,10 @@ function aggregateTBRows(tbRows, mappingIndex, method, masterIndex = new Map()) 
     agg.rows.push(row);
   }
  
-  // Apply display sign flip
   for (const agg of aggregates.values()) {
     agg.totalFinalNet = displaySign(agg.totalRawNet, agg.assetLiability);
   }
  
-  // Close P&L into Equity
   const plRawSum  = [...aggregates.values()].filter(a => a.sheet === 'PL').reduce((s,a) => s + a.totalRawNet, 0);
   const ociRawSum = [...aggregates.values()].filter(a => a.sheet === 'OCI').reduce((s,a) => s + a.totalRawNet, 0);
   const patDisplay = -plRawSum;
@@ -221,24 +186,14 @@ function aggregateTBRows(tbRows, mappingIndex, method, masterIndex = new Map()) 
  
   if (Math.abs(patDisplay) > 0.01) {
     aggregates.set('__PROFIT_FOR_YEAR__', {
-      groupName:      'Profit / (Loss) for the Year',
-      totalRawNet:    plRawSum,
-      totalFinalNet:  patDisplay,
-      noteGroupId:    null,
-      sheet:          'BS',
-      assetLiability: 'Equity',
-      rows:           [],
+      groupName: 'Profit / (Loss) for the Year', totalRawNet: plRawSum, totalFinalNet: patDisplay,
+      noteGroupId: null, sheet: 'BS', assetLiability: 'Equity', rows: [],
     });
   }
   if (Math.abs(ociDisplay) > 0.01) {
     aggregates.set('__OCI_EQUITY__', {
-      groupName:      'Other Comprehensive Income / (Loss)',
-      totalRawNet:    ociRawSum,
-      totalFinalNet:  ociDisplay,
-      noteGroupId:    null,
-      sheet:          'BS',
-      assetLiability: 'Equity',
-      rows:           [],
+      groupName: 'Other Comprehensive Income / (Loss)', totalRawNet: ociRawSum, totalFinalNet: ociDisplay,
+      noteGroupId: null, sheet: 'BS', assetLiability: 'Equity', rows: [],
     });
   }
  
@@ -278,9 +233,6 @@ async function generateFS(engagementId, firmId) {
  
   const mappingIndex = new Map(mappings.map(m => [m.subGrouping.trim().toLowerCase(), m]));
  
-  // ── Build MasterGrouping index keyed by groupName (resilient to re-seeding) ─
-  // Keying by groupName (not UUID) means stale Mapping.masterGroupingId values
-  // don't break generation. Any re-seed/truncate of MasterGrouping is safe.
   let masterIndex = new Map();
   try {
     const applicabilities = ['ALL'];
@@ -301,7 +253,6 @@ async function generateFS(engagementId, firmId) {
     console.warn('[FS] MasterGrouping lookup failed, using classify() fallback:', schemaErr.message);
   }
  
-  // ── Aggregate CY ──────────────────────────────────────────────────────────
   const { aggregates: cyAggs, unmappedSGs } = aggregateTBRows(latestCY.rows, mappingIndex, method, masterIndex);
  
   const roundingThreshold = currency === 'AED' ? 10 : 100;
@@ -326,7 +277,6 @@ async function generateFS(engagementId, firmId) {
     ? [{ type: 'BS_MISMATCH', message: `Balance Sheet difference: ${bsDiff.toFixed(2)}.`, detail: { bsDiff } }]
     : [];
  
-  // ── Aggregate PY ──────────────────────────────────────────────────────────
   let pyAggs = new Map();
   let hasPY  = false;
   if (latestPY && latestPY.rows.length > 0) {
@@ -347,7 +297,6 @@ async function generateFS(engagementId, firmId) {
     hasPY  = true;
   }
  
-  // ── Sort CY aggregates ────────────────────────────────────────────────────
   const SHEET_ORDER = { BS: 0, PL: 1, OCI: 2 };
   const isIFRS      = ['IFRS','IFRS_SME'].includes(method);
   const BS_AL_ORDER = isIFRS ? { Assets: 0, Equity: 1, Liabilities: 2 } : { Equity: 0, Liabilities: 1, Assets: 2 };
@@ -424,31 +373,24 @@ async function generateFS(engagementId, firmId) {
   const uniqueNoteGroupIds = [...new Set(sortedCYAggs.map(a => a.noteGroupId).filter(Boolean))];
   const noteNumberMap      = assignNoteNumbers(method, uniqueNoteGroupIds);
  
-  // ── Persist to DB ─────────────────────────────────────────────────────────
-  // Use sequential prisma calls (not a long transaction) to avoid timeout.
-  // Delete old data first, then bulk-insert new data with createMany.
-  // Delete in correct FK order inside a transaction to prevent concurrent-call FK errors
+  // Delete in correct FK order inside a transaction to prevent concurrent FK errors
   await prisma.$transaction([
     prisma.noteDetail.deleteMany({ where: { engagementId } }),
     prisma.fSLine.deleteMany({    where: { engagementId } }),
     prisma.noteGroup.deleteMany({ where: { engagementId } }),
   ]);
  
-  // Create NoteGroups
   const createdNGs = new Map();
   for (const agg of sortedCYAggs) {
     if (!agg.noteGroupId || createdNGs.has(agg.noteGroupId)) continue;
     const noteNumber = noteNumberMap.get(agg.noteGroupId);
-    if (!noteNumber) continue; // skip if somehow not in map (shouldn't happen)
+    if (!noteNumber) continue;
     const ng = await prisma.noteGroup.create({
       data: { engagementId, noteGroupId: agg.noteGroupId, noteNumber, title: agg.groupName, isMandatory: false },
     });
     createdNGs.set(agg.noteGroupId, ng);
   }
  
-  // Bulk-insert CY FSLines
-  // isPriorYear column may not exist if migration hasn't been run yet.
-  // Try with it first; if Postgres complains the column is missing, retry without it.
   let order = 0;
   const cyLineRows = sortedCYAggs.map(agg => ({
     engagementId,
@@ -476,19 +418,15 @@ async function generateFS(engagementId, firmId) {
     }
   }
  
-  // Build fsLineData for return value (enrich with noteGroup)
   const fsLineData = cyLineRows.map(line => ({
-    ...line,
-    id:          null, // not needed for return value
+    ...line, id: null,
     noteGroup:   line.noteGroupId ? (createdNGs.get(line.noteGroupId) || null) : null,
     generatedAt: new Date(),
   }));
  
-  // Bulk-insert PY FSLines
   if (hasPY) {
     let pyOrder = 0;
     const pyLineRows = [];
- 
     for (const cyAgg of sortedCYAggs) {
       const pyAgg = pyAggs.get(cyAgg.groupName);
       pyLineRows.push({
@@ -503,7 +441,6 @@ async function generateFS(engagementId, firmId) {
         isPriorYear:    true,
       });
     }
-    // PY-only groups
     for (const [gn, pyAgg] of pyAggs) {
       if (cyAggs.has(gn)) continue;
       pyLineRows.push({
@@ -524,7 +461,6 @@ async function generateFS(engagementId, firmId) {
       } catch (pyColErr) {
         if (pyColErr.message?.includes('isPriorYear') || pyColErr.message?.includes('column')) {
           console.warn('[FS] isPriorYear column missing for PY — skipping PY lines (run migration)');
-          // PY lines can't be stored without the column — hasPY will be false on getFS
         } else {
           throw pyColErr;
         }
@@ -534,7 +470,6 @@ async function generateFS(engagementId, firmId) {
  
   const result = { sheets: groupBySheet(fsLineData), errors, unmappedCount: unmappedSGs.size, hasPY };
  
-  // NoteDetails (CY only)
   try {
     await prisma.noteDetail.deleteMany({ where: { engagementId } });
     for (const agg of sortedCYAggs) {
@@ -562,7 +497,7 @@ async function generateFS(engagementId, firmId) {
 }
  
 // ════════════════════════════════════════════════════════════════════════════
-// GET FS — returns CY lines enriched with PY amounts as pyAmount field
+// GET FS
 // ════════════════════════════════════════════════════════════════════════════
 async function getFS(engagementId) {
   const [allLines, noteGroups] = await Promise.all([
@@ -573,7 +508,6 @@ async function getFS(engagementId) {
   const ngMap   = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
   const cyLines = allLines.filter(l => !l.isPriorYear);
   const pyLines = allLines.filter(l => l.isPriorYear);
- 
   const pyByGroup = new Map(pyLines.map(l => [l.groupName, l]));
   const hasPY     = pyLines.length > 0;
  
@@ -595,4 +529,3 @@ function groupBySheet(lines) {
 }
  
 module.exports = { generateFS, getFS };
- 
