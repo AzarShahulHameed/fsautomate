@@ -1,20 +1,21 @@
+
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams } from 'react-router-dom';
 import { useDropzone } from 'react-dropzone';
 import { tbAPI } from '../api/client';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
-
+ 
 const fmtN = n => Math.round(Math.abs(Number(n||0))).toLocaleString('en-IN');
 const fmtDate = d => d ? new Date(d).toLocaleString('en-IN',{day:'2-digit',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'}) : '—';
-
+ 
 // ── Drop Zone ─────────────────────────────────────────────────────────────────
 function DropZone({ onUpload, uploading, isPriorYear, label, setLabel }) {
   const onDrop = useCallback(async (files) => {
     if (!files[0]) return;
     await onUpload(files[0], isPriorYear, label || null);
   }, [onUpload, isPriorYear, label]);
-
+ 
   const { getRootProps, getInputProps, isDragActive } = useDropzone({
     onDrop,
     accept: {
@@ -25,9 +26,9 @@ function DropZone({ onUpload, uploading, isPriorYear, label, setLabel }) {
     maxFiles: 1,
     disabled: uploading,
   });
-
+ 
   const color = isPriorYear ? 'amber' : 'indigo';
-
+ 
   return (
     <div>
       {isPriorYear && (
@@ -64,12 +65,12 @@ function DropZone({ onUpload, uploading, isPriorYear, label, setLabel }) {
     </div>
   );
 }
-
+ 
 // ── Diff Viewer ───────────────────────────────────────────────────────────────
 function DiffViewer({ version, currency, onClose }) {
   const [search, setSearch] = useState('');
   const [filter, setFilter] = useState('all');
-
+ 
   const diffs = version?.diffs || [];
   const filtered = diffs.filter(d => {
     if (filter !== 'all' && d.action?.toUpperCase() !== filter.toUpperCase()) return false;
@@ -79,20 +80,20 @@ function DiffViewer({ version, currency, onClose }) {
     }
     return true;
   });
-
+ 
   const counts = {
     ADDED:   diffs.filter(d => d.action === 'ADDED').length,
     DELETED: diffs.filter(d => d.action === 'DELETED').length,
     CHANGED: diffs.filter(d => d.action === 'CHANGED').length,
   };
-
+ 
   if (!diffs.length) return (
     <div className="bg-slate-800 rounded-2xl p-6 text-center">
       <p className="text-slate-400">No changes recorded for this version — it was the first upload.</p>
       <button onClick={onClose} className="mt-4 px-4 py-2 bg-slate-600 text-white text-sm rounded-xl">Close</button>
     </div>
   );
-
+ 
   return (
     <div className="bg-slate-900 rounded-2xl overflow-hidden border border-slate-700 shadow-2xl">
       {/* Header */}
@@ -105,7 +106,7 @@ function DiffViewer({ version, currency, onClose }) {
         </div>
         <button onClick={onClose} className="text-slate-400 hover:text-white text-xl">✕</button>
       </div>
-
+ 
       {/* Filters */}
       <div className="flex items-center gap-3 px-5 py-3 bg-slate-800/50 border-b border-slate-700 flex-wrap">
         {[
@@ -123,7 +124,7 @@ function DiffViewer({ version, currency, onClose }) {
           placeholder="Search account..."
           className="ml-auto bg-slate-700 border border-slate-600 text-white rounded-lg px-3 py-1.5 text-xs focus:outline-none focus:border-indigo-500 w-44 placeholder-slate-500" />
       </div>
-
+ 
       {/* Table */}
       <div className="overflow-auto max-h-96">
         {filtered.length === 0 ? (
@@ -163,7 +164,7 @@ function DiffViewer({ version, currency, onClose }) {
           </table>
         )}
       </div>
-
+ 
       <div className="px-5 py-3 bg-slate-800 border-t border-slate-700 flex justify-between items-center">
         <p className="text-xs text-slate-500">Showing {filtered.length} of {diffs.length} changes</p>
         <button onClick={onClose} className="px-4 py-1.5 bg-slate-600 text-white text-xs rounded-lg hover:bg-slate-500">Close</button>
@@ -171,12 +172,12 @@ function DiffViewer({ version, currency, onClose }) {
     </div>
   );
 }
-
+ 
 // ── Version Card ──────────────────────────────────────────────────────────────
 function VersionCard({ version, isLatest, currency, onViewDiff, diffLoading, activeDiff }) {
   const isPY = version.isPriorYear;
   const isActive = activeDiff?.id === version.id;
-
+ 
   return (
     <div className={`bg-white border-2 rounded-2xl p-4 transition-all ${
       isActive ? 'border-indigo-500 shadow-lg shadow-indigo-100' :
@@ -202,7 +203,7 @@ function VersionCard({ version, isLatest, currency, onViewDiff, diffLoading, act
             </div>
           </div>
         </div>
-
+ 
         {/* Actions */}
         <div className="flex items-center gap-2 flex-shrink-0">
           {!isPY && (
@@ -218,7 +219,7 @@ function VersionCard({ version, isLatest, currency, onViewDiff, diffLoading, act
           )}
         </div>
       </div>
-
+ 
       {/* Summary of changes if available */}
       {!isPY && version.diffs?.length > 0 && (
         <div className="mt-3 pt-3 border-t border-slate-100 flex items-center gap-3 flex-wrap">
@@ -243,16 +244,16 @@ function VersionCard({ version, isLatest, currency, onViewDiff, diffLoading, act
     </div>
   );
 }
-
+ 
 // ── Main Page ─────────────────────────────────────────────────────────────────
 export default function TBUpload() {
   const { engagementId } = useParams();
   const { currentEngagement, currentClient, firm } = useStore();
-
+ 
   const method   = currentEngagement?.method || 'AS';
   const region   = currentClient?.region || (currentClient?.country === 'UAE' ? 'UAE' : firm?.region || 'India');
   const currency = (method === 'IFRS' || method === 'IFRS_SME') ? 'AED' : region === 'UAE' ? 'AED' : 'INR';
-
+ 
   const [versions,     setVersions]     = useState([]);
   const [uploading,    setUploading]     = useState(false);
   const [uploadingPY,  setUploadingPY]  = useState(false);
@@ -263,19 +264,19 @@ export default function TBUpload() {
   const [prevYearInfo, setPrevYearInfo] = useState(null);
   const [loadingPrev,  setLoadingPrev]  = useState(false);
   const [copying,      setCopying]      = useState(false);
-
+ 
   useEffect(() => {
     loadVersions();
     loadPrevYearInfo();
   }, [engagementId]);
-
+ 
   async function loadVersions() {
     try {
       const data = await tbAPI.versions(engagementId);
       setVersions(Array.isArray(data) ? data : []);
     } catch { setVersions([]); }
   }
-
+ 
   async function loadPrevYearInfo() {
     setLoadingPrev(true);
     try {
@@ -284,7 +285,7 @@ export default function TBUpload() {
     } catch { setPrevYearInfo(null); }
     finally { setLoadingPrev(false); }
   }
-
+ 
   async function handleUpload(file, isPriorYear, label) {
     if (isPriorYear) setUploadingPY(true);
     else setUploading(true);
@@ -300,32 +301,32 @@ export default function TBUpload() {
       toast.error(err?.error || 'Upload failed — check file format');
     } finally { setUploading(false); setUploadingPY(false); }
   }
-
+ 
   async function copyPrevYearTB() {
     if (!prevYearInfo?.found) return;
     setCopying(true);
     try {
-      await tbAPI.copyPriorYear(engagementId, prevYearInfo.prevEngagementId, prevYearInfo.label);
-      toast.success(`Prior Year TB copied — ${prevYearInfo.rowCount} rows`);
+      await tbAPI.copyPriorYear(engagementId, prevYearInfo?.prevEngagementId, prevYearInfo?.label);
+      toast.success(`Prior Year TB copied — ${prevYearInfo?.rowCount} rows`);
       await loadVersions();
       setActiveTab('history');
     } catch (err) {
       toast.error(err?.error || 'Failed to copy prior year TB');
     } finally { setCopying(false); }
   }
-
+ 
   function viewDiff(version) {
     if (activeDiff?.id === version.id) { setActiveDiff(null); return; }
     setDiffLoading(version.id);
     setActiveDiff(version);
     setDiffLoading(null);
   }
-
+ 
   const cyVersions = versions.filter(v => !v.isPriorYear);
   const pyVersions = versions.filter(v => v.isPriorYear);
   const latestCY   = cyVersions[0];
   const hasPY      = pyVersions.length > 0;
-
+ 
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50/20 p-6">
       {/* Header */}
@@ -335,7 +336,7 @@ export default function TBUpload() {
           {currentClient?.name} · {method} · {currency} · Max 5 versions per engagement
         </p>
       </div>
-
+ 
       {/* Stats */}
       {versions.length > 0 && (
         <div className="grid grid-cols-3 gap-3 mb-6">
@@ -356,7 +357,7 @@ export default function TBUpload() {
           ))}
         </div>
       )}
-
+ 
       {/* Tabs */}
       <div className="flex gap-0 mb-5 border-b border-slate-200">
         {[
@@ -378,7 +379,7 @@ export default function TBUpload() {
           </button>
         ))}
       </div>
-
+ 
       {/* ── CURRENT YEAR ── */}
       {activeTab === 'current' && (
         <div className="space-y-5 max-w-2xl">
@@ -403,35 +404,35 @@ export default function TBUpload() {
           )}
         </div>
       )}
-
+ 
       {/* ── PRIOR YEAR ── */}
       {activeTab === 'prior' && (
         <div className="space-y-5 max-w-2xl">
           {/* Auto-detect banner */}
           {!loadingPrev && prevYearInfo && (
-            <div className={`rounded-2xl border p-5 ${prevYearInfo.found ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
+            <div className={`rounded-2xl border p-5 ${prevYearInfo?.found ? 'bg-emerald-50 border-emerald-200' : 'bg-slate-50 border-slate-200'}`}>
               <div className="flex items-start justify-between gap-4">
                 <div>
-                  <p className={`font-bold text-sm mb-1 ${prevYearInfo.found ? 'text-emerald-800' : 'text-slate-600'}`}>
-                    {prevYearInfo.found ? '✅ Previous Year TB Found Automatically' : '🔍 Auto-Detection Result'}
+                  <p className={`font-bold text-sm mb-1 ${prevYearInfo?.found ? 'text-emerald-800' : 'text-slate-600'}`}>
+                    {prevYearInfo?.found ? '✅ Previous Year TB Found Automatically' : '🔍 Auto-Detection Result'}
                   </p>
-                  {prevYearInfo.found ? (
+                  {prevYearInfo?.found ? (
                     <>
                       <p className="text-emerald-700 text-xs">
-                        Engagement: <strong>{prevYearInfo.prevEngagementName}</strong> · FY {prevYearInfo.prevFY}
+                        Engagement: <strong>{prevYearInfo?.prevEngagementName}</strong> · FY {prevYearInfo?.prevFY}
                       </p>
                       <p className="text-emerald-700 text-xs mt-0.5">
-                        {(prevYearInfo.rowCount||0).toLocaleString('en-IN')} rows · Uploaded {fmtDate(prevYearInfo.uploadedAt)}
+                        {(prevYearInfo?.rowCount||0).toLocaleString('en-IN')} rows · Uploaded {fmtDate(prevYearInfo?.uploadedAt)}
                       </p>
                       <p className="text-emerald-600 text-xs mt-1 italic">
                         The TB from the previous engagement for this client was found. Click "Use as Prior Year" to copy it.
                       </p>
                     </>
                   ) : (
-                    <p className="text-slate-500 text-xs">{prevYearInfo.message || 'No prior year engagement found for this client.'}</p>
+                    <p className="text-slate-500 text-xs">{prevYearInfo?.message || 'No prior year engagement found for this client.'}</p>
                   )}
                 </div>
-                {prevYearInfo.found && !hasPY && (
+                {prevYearInfo?.found && !hasPY && (
                   <button onClick={copyPrevYearTB} disabled={copying}
                     className="px-4 py-2 bg-emerald-600 text-white text-sm font-semibold rounded-xl hover:bg-emerald-700 disabled:opacity-50 whitespace-nowrap flex-shrink-0">
                     {copying ? '⏳ Copying...' : '✅ Use as Prior Year'}
@@ -446,7 +447,7 @@ export default function TBUpload() {
               🔍 Checking for previous year engagement...
             </div>
           )}
-
+ 
           <div className="bg-white border border-amber-200 rounded-2xl p-6">
             <h2 className="font-bold text-slate-800 mb-1">Manual Upload — Prior Year TB</h2>
             <p className="text-slate-500 text-sm mb-3">
@@ -457,7 +458,7 @@ export default function TBUpload() {
             </div>
             <DropZone onUpload={handleUpload} uploading={uploadingPY} isPriorYear={true} label={pyLabel} setLabel={setPyLabel} />
           </div>
-
+ 
           {hasPY && (
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center gap-3">
               <span className="text-2xl">✅</span>
@@ -471,7 +472,7 @@ export default function TBUpload() {
           )}
         </div>
       )}
-
+ 
       {/* ── VERSION HISTORY ── */}
       {activeTab === 'history' && (
         <div className="space-y-4 max-w-2xl">
@@ -507,7 +508,7 @@ export default function TBUpload() {
                   </div>
                 </div>
               )}
-
+ 
               {pyVersions.length > 0 && (
                 <div className="mt-5">
                   <h3 className="text-xs font-bold text-slate-500 uppercase tracking-wider mb-2">Prior Year</h3>
@@ -522,7 +523,7 @@ export default function TBUpload() {
           )}
         </div>
       )}
-
+ 
       {/* ── FORMAT GUIDE ── */}
       {activeTab === 'format' && (
         <div className="max-w-2xl space-y-4">
