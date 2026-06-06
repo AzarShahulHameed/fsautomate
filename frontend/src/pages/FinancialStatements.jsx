@@ -472,10 +472,12 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
         <Blank/>
         <R label={ciLabel} amount={totalCI} pyAmt={pyCI} bold borderTop />
       </>}
-      <Blank/>
-      <R label="Earnings Per Share" bold />
-      <R label="Basic EPS" amount={null} indent={2} />
-      <R label="Diluted EPS" amount={null} indent={2} />
+      {method === 'IFRS' && <>
+        <Blank/>
+        <R label="Earnings Per Share" bold />
+        <R label="Basic EPS (IAS 33)" amount={null} indent={2} />
+        <R label="Diluted EPS (IAS 33)" amount={null} indent={2} />
+      </>}
     </>
   );
 
@@ -518,16 +520,22 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
   const D       = divisor;
   const isIFRS  = method==='IFRS'||method==='IFRS_SME';
 
-  // ── P&L line classification ────────────────────────────────────────────────
+  // ── P&L line classification ─────────────────────────────────────────────────
   const incomeLines  = plLines.filter(l=>l.assetLiability==='Income'&&l.sheet==='PL');
   const expenseLines = plLines.filter(l=>l.assetLiability==='Expenses'&&l.sheet==='PL');
   const totalIncome  = incomeLines.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const totalExpense = expenseLines.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const pbt          = totalIncome - totalExpense;
 
-  // CFS reads plCategory and isCashItem — zero keyword matching
+  // PY equivalents (for second column)
+  const pyTotalIncome  = hasPY ? incomeLines.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
+  const pyTotalExpense = hasPY ? expenseLines.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
+  const pyPbt          = hasPY ? (pyTotalIncome - pyTotalExpense) : null;
+
   const depr     = expenseLines.filter(l=>l.plCategory==='depreciation').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const finCost  = expenseLines.filter(l=>l.plCategory==='financeCost').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
+  const pyDepr   = hasPY ? expenseLines.filter(l=>l.plCategory==='depreciation').reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
+  const pyFinCost= hasPY ? expenseLines.filter(l=>l.plCategory==='financeCost').reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const cash     = bsLines.filter(l=>l.isCashItem===true&&l.assetLiability==='Assets').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
 
   // ── Working capital changes (indirect method) ─────────────────────────────
@@ -557,9 +565,14 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
   }
 
   const operatingCashBeforeTax = pbt + depr + finCost + workingCapitalChanges;
+
+  // PY: opening cash = cash balance two years ago (not available without PPY TB)
+  // So PY CFS column shows structure but can't show full tally without PPY data
   const openingCash = hasPY
     ? bsLines.filter(l=>l.isCashItem===true&&l.assetLiability==='Assets').reduce((s,l)=>s+Number(l.pyAmount||0),0)
     : 0;
+  // PY WC is approximated from PY P&L (can't compute BS movements without PPY)
+  const pyOperating = hasPY ? (pyPbt + pyDepr + pyFinCost) : null;
 
   // ── Investing: PPE movements from BS (CY - PY = net capex) ────────────────
   // CFS investing: uses currentNonCurrent field — all noncurrent assets are capex candidates
@@ -603,21 +616,20 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
     }
   }
   const netFinancing = netBorrowing - finCost;
-
-  // Net change = Operating + Investing + Financing
-  // Operating = operatingCashBeforeTax - taxPaid (we use pbt as before-tax approximation)
-  // netOperating = full operating cash including finance cost addback
-  // Finance costs are paid in financing section — they cancel out in the total
   const netOperating = operatingCashBeforeTax;
   const netChange    = netOperating + netInvesting + netFinancing;
+  // PY column: operating only (no BS movement data for PY investing/financing)
+  const pyNetChange  = hasPY ? pyOperating : null;
 
-  const CRow = ({label, amount, bold, indent, sub}) => (
+  const cols = hasPY ? 3 : 2;
+  const CRow = ({label, amount, pyAmt, bold, indent, sub}) => (
     <tr className={`${bold?'border-t-2 border-slate-500 bg-slate-50':'border-b border-slate-100 hover:bg-blue-50'}`}>
       <td className={`py-2 text-sm ${indent===2?'pl-10':indent?'pl-6':'pl-3'} ${bold?'font-bold text-slate-900':sub?'text-slate-500 italic':'text-slate-700'}`}>{label}</td>
       <td className={`py-2 pr-3 text-right font-mono text-sm ${bold?'font-bold text-slate-900':sub?'text-slate-500':'text-slate-800'}`}>{amount!==undefined&&amount!==null?fmt(amount,D,locale):''}</td>
+      {hasPY && <td className={`py-2 pr-3 text-right font-mono text-sm ${bold?'font-bold text-slate-400':'text-slate-400'}`}>{pyAmt!==undefined&&pyAmt!==null?fmt(pyAmt,D,locale):'—'}</td>}
     </tr>
   );
-  const SH = ({label}) => <tr className="bg-slate-100"><td colSpan={2} className="px-3 py-2 font-bold text-slate-700 text-xs uppercase">{label}</td></tr>;
+  const SH = ({label}) => <tr className="bg-slate-100"><td colSpan={cols} className="px-3 py-2 font-bold text-slate-700 text-xs uppercase">{label}</td></tr>;
 
   return (
     <div>
@@ -636,49 +648,55 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
         ))}
       </div>
       <table className="w-full text-sm border border-slate-300 rounded-lg overflow-hidden">
-        <thead><tr className="bg-slate-800 text-white"><th className="text-left px-3 py-3">Particulars</th><th className="text-right px-3 py-3 w-44">Amount ({currSymbol})</th></tr></thead>
+        <thead><tr className="bg-slate-800 text-white">
+          <th className="text-left px-3 py-3">Particulars</th>
+          <th className="text-right px-3 py-3 w-44">{cyYear} ({currSymbol})</th>
+          {hasPY && <th className="text-right px-3 py-3 w-44 text-slate-400">{pyYear} ({currSymbol})</th>}
+        </tr></thead>
         <tbody>
           <SH label="A. Cash Flow from Operating Activities" />
           {cfsMethod==='indirect'?<>
-            <CRow label="Net Profit / (Loss) Before Tax and Finance Costs" amount={pbt} indent />
-            <CRow label="Add: Depreciation and Amortisation" amount={depr} indent={2} />
-            <CRow label="Add: Finance Costs" amount={finCost} indent={2} />
+            <CRow label="Net Profit / (Loss) Before Tax and Finance Costs" amount={pbt} pyAmt={pyPbt} indent />
+            <CRow label="Add: Depreciation and Amortisation" amount={depr} pyAmt={pyDepr} indent={2} />
+            <CRow label="Add: Finance Costs" amount={finCost} pyAmt={pyFinCost} indent={2} />
             {hasPY ? <>
               <tr className="bg-slate-50/60"><td colSpan={2} className="px-3 py-1.5 text-xs font-semibold text-slate-500 uppercase">Working Capital Changes</td></tr>
               {wcItems.map((item,i)=><CRow key={i} label={item.label} amount={item.amount} indent={2} sub />)}
               <CRow label="Total Working Capital Changes" amount={workingCapitalChanges} indent bold={false} />
             </> : <CRow label="Working Capital Changes — upload prior year TB for details" amount={0} indent={2} sub />}
-            <CRow label="Cash Generated from Operations" amount={operatingCashBeforeTax} bold />
+            <CRow label="Cash Generated from Operations" amount={operatingCashBeforeTax} pyAmt={pyOperating} bold />
           </>:<>
             <CRow label="Cash receipts from customers" amount={totalIncome} indent />
             <CRow label="Cash paid to suppliers and employees" amount={-Math.abs(totalExpense-depr-finCost)} indent />
           </>}
-          <CRow label="Net Cash from Operating Activities (A)" amount={netOperating} bold />
+          <CRow label="Net Cash from Operating Activities (A)" amount={netOperating} pyAmt={pyOperating} bold />
           <SH label="B. Cash Flow from Investing Activities" />
           {hasPY ? <>
             {capexItems.map((it,i)=><CRow key={i} label={it.label} amount={it.amount} indent={2} sub />)}
             {investItems.map((it,i)=><CRow key={i} label={it.label} amount={it.amount} indent={2} sub />)}
             {(capexItems.length===0&&investItems.length===0) && <CRow label="No movement in NCA" amount={0} indent sub />}
           </> : <CRow label="Upload prior year TB for investing activities" amount={0} indent sub />}
-          <CRow label="Net Cash from Investing Activities (B)" amount={netInvesting} bold />
+          <CRow label="Net Cash from Investing Activities (B)" amount={netInvesting} pyAmt={null} bold />
           <SH label="C. Cash Flow from Financing Activities" />
           {hasPY ? <>
             {borrowItems.map((it,i)=><CRow key={i} label={it.label} amount={it.amount} indent={2} sub />)}
           </> : <CRow label="Upload prior year TB for financing activities" amount={0} indent sub />}
           <CRow label="Finance Costs Paid" amount={-finCost} indent={2} sub />
-          <CRow label="Net Cash from Financing Activities (C)" amount={netFinancing} bold />
+          <CRow label="Net Cash from Financing Activities (C)" amount={netFinancing} pyAmt={null} bold />
           <tr className="border-t-2 border-slate-700 bg-slate-50">
             <td className="px-3 py-3 font-bold text-slate-900 text-sm">Net Change in Cash and Cash Equivalents (A+B+C)</td>
             <td className="px-3 py-3 text-right font-mono font-bold">{fmt(netChange,D,locale)}</td>
+            {hasPY && <td className="px-3 py-3 text-right font-mono font-bold text-slate-400">{pyNetChange!==null?fmt(pyNetChange,D,locale):'—'}</td>}
           </tr>
-          <CRow label={hasPY?'Cash and Cash Equivalents at Beginning of Year':'Cash and Cash Equivalents at Beginning of Year'} amount={openingCash} indent />
+          <CRow label="Cash and Cash Equivalents at Beginning of Year" amount={openingCash} pyAmt={null} indent />
           <tr className="border-t-2 border-slate-700 bg-indigo-50">
             <td className="px-3 py-3 font-bold text-indigo-900 text-sm">Cash and Cash Equivalents at End of Year</td>
             <td className="px-3 py-3 text-right font-mono font-bold text-indigo-900">{fmt(cash,D,locale)}</td>
+            {hasPY && <td className="px-3 py-3 text-right font-mono font-bold text-slate-400">{fmt(openingCash,D,locale)}</td>}
           </tr>
           {hasPY && Math.abs(cash - openingCash - netChange) > 1 && (
             <tr className="bg-red-50">
-              <td className="px-3 py-2 text-xs text-red-600 italic" colSpan={2}>
+              <td className="px-3 py-2 text-xs text-red-600 italic" colSpan={cols}>
                 ⚠ CFS closing cash ({fmt(openingCash+netChange,D,locale)}) differs from BS cash ({fmt(cash,D,locale)}) by {fmt(Math.abs(cash-openingCash-netChange),D,locale)} — check investing/financing activities
               </td>
             </tr>
