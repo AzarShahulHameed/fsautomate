@@ -1,9 +1,32 @@
-// src/utils/noteNumbering.js
-'use strict';
 
-// ── Mandatory notes per method ────────────────────────────────────────────────
-// These are fixed numbers that never change regardless of what TB is uploaded.
-// Data notes start immediately after the last mandatory note number.
+// src/utils/noteNumbering.js
+// ─────────────────────────────────────────────────────────────────────────────
+// NOTE SEQUENTIAL NUMBERING
+//
+// CRITICAL RULE: Note numbers assigned to NOTE GROUP IDs, never to rows.
+// Multiple FS lines can share the same note number.
+//
+// AS Method note structure:
+//   Note 1 → General Information (mandatory)
+//   Note 2 → Accounting Policy (mandatory)
+//   Note 3+ → Breakups (from noteGroupIds)
+//
+// IND AS Method note structure:
+//   Note 1 → Notes to FS (mandatory)
+//   Note 2 → Accounting Policy (mandatory)
+//   Note 3 → Significant Judgements (mandatory)
+//   Note 4 → Key Estimates (mandatory)
+//   Note 5+ → Breakups
+//
+// IFRS / IFRS SME:
+//   Note 1 → Notes to FS
+//   Note 2 → Accounting Policy
+//   Note 3 → Custom
+//   Note 4 → Custom
+//   Note 5+ → Breakups
+// ─────────────────────────────────────────────────────────────────────────────
+'use strict';
+ 
 const MANDATORY_NOTES = {
   AS: [
     { noteGroupId: '__GENERAL_INFO__',      noteNumber: 1, title: 'General Information' },
@@ -27,61 +50,45 @@ const MANDATORY_NOTES = {
     { noteGroupId: '__CUSTOM_3__',          noteNumber: 3, title: 'Significant Judgements' },
   ],
 };
-
-// ── FS display order for data notes ──────────────────────────────────────────
-// Notes must appear in the order their parent FS line appears on the statements.
-// This order is: BS (Equity first for AS/IndAS, Assets first for IFRS) → PL → OCI.
-// Within BS, the Schedule III / IAS 1 order is reflected in the master seed's displayOrder.
-// We honour the FS generation sort order — noteGroupIds are passed in already sorted.
-
+ 
 /**
- * Assign strictly sequential note numbers to an ordered array of noteGroupIds.
- * The input array MUST already be in FS display order (sorted by sheet + AL + displayOrder).
+ * Assign sequential note numbers to an array of noteGroupIds.
  *
- * Rules:
- *   - Mandatory notes get their fixed numbers first.
- *   - Data notes get consecutive numbers starting right after mandatory.
- *   - Each unique noteGroupId gets exactly one number — no gaps, no skips.
- *   - If the same noteGroupId appears multiple times (shared across FS lines), it
- *     keeps its first assigned number.
- *
- * @param {string}   method       — 'AS' | 'IND_AS' | 'IFRS' | 'IFRS_SME'
- * @param {string[]} noteGroupIds — unique IDs in FS display order, no nulls
- * @returns {Map<string, number>} — noteGroupId → noteNumber
+ * @param {string}   method         — 'AS' | 'IND_AS' | 'IFRS' | 'IFRS_SME'
+ * @param {string[]} noteGroupIds   — unique IDs from FS generation (no __MANDATORY__ ones)
+ * @returns {Map<string, number>}   — noteGroupId → noteNumber
  */
 function assignNoteNumbers(method, noteGroupIds) {
-  const mandatory    = MANDATORY_NOTES[method] || MANDATORY_NOTES['AS'];
-  const mandatoryIds = new Set(mandatory.map(m => m.noteGroupId));
-
+  const mandatory = MANDATORY_NOTES[method] || MANDATORY_NOTES['AS'];
+  const startFrom = mandatory.length + 1;
+ 
   const result = new Map();
-
-  // Step 1: seed mandatory notes with their fixed numbers
+ 
+  // Add mandatory notes first
   for (const m of mandatory) {
     result.set(m.noteGroupId, m.noteNumber);
   }
-
-  // Step 2: filter to data-only noteGroupIds (exclude mandatory, exclude nulls/empty)
-  // Deduplicate while preserving order — first occurrence wins
-  const seen      = new Set();
-  const dataIds   = [];
-  for (const id of noteGroupIds) {
-    if (!id || mandatoryIds.has(id) || seen.has(id)) continue;
-    seen.add(id);
-    dataIds.push(id);
+ 
+  // Assign sequential numbers to data note groups
+  // Filter out any that accidentally match mandatory IDs
+  const mandatoryIds = new Set(mandatory.map(m => m.noteGroupId));
+  const dataNoteGroups = noteGroupIds.filter(id => id && !mandatoryIds.has(id));
+ 
+  let counter = startFrom;
+  for (const id of dataNoteGroups) {
+    if (!result.has(id)) {
+      result.set(id, counter++);
+    }
   }
-
-  // Step 3: assign strictly sequential numbers starting right after mandatory
-  const startFrom = mandatory.length + 1;
-  let counter     = startFrom;
-  for (const id of dataIds) {
-    result.set(id, counter++);
-  }
-
+ 
   return result;
 }
-
+ 
+/**
+ * Get the mandatory note definitions for a method
+ */
 function getMandatoryNotes(method) {
   return MANDATORY_NOTES[method] || MANDATORY_NOTES['AS'];
 }
-
+ 
 module.exports = { assignNoteNumbers, getMandatoryNotes };

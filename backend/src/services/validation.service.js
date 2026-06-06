@@ -1,9 +1,10 @@
+
 'use strict';
 const { prisma } = require('../config/db');
-
+ 
 async function runAllChecks(engagementId, tbVersionId) {
   const checks = [];
-
+ 
   // Load all data
   const [fsLines, noteGroups, noteDetails, tbVersion, mappings] = await Promise.all([
     prisma.fSLine.findMany({ where: { engagementId } }),
@@ -16,11 +17,11 @@ async function runAllChecks(engagementId, tbVersionId) {
     }),
     prisma.mapping.findMany({ where: { engagementId } }),
   ]);
-
+ 
   const bsLines  = fsLines.filter(l => l.sheet === 'BS');
   const plLines  = fsLines.filter(l => l.sheet === 'PL');
   const ociLines = fsLines.filter(l => l.sheet === 'OCI');
-
+ 
   // ── 1. TB BALANCE CHECK ───────────────────────────────────────────────────
   // The raw TB itself must balance (ΣfinalNet = 0)
   if (tbVersion?.rows?.length > 0) {
@@ -36,7 +37,7 @@ async function runAllChecks(engagementId, tbVersionId) {
       detail: { tbSum, tbDiff, rowCount: tbVersion.rows.length },
     });
   }
-
+ 
   // ── 2. UNMAPPED ITEMS CHECK ───────────────────────────────────────────────
   const mappedSGs  = new Set(mappings.map(m => m.subGrouping.trim().toLowerCase()));
   const allSGs     = [...new Set(tbVersion?.rows?.map(r => r.subGrouping?.trim().toLowerCase()) || [])];
@@ -44,7 +45,7 @@ async function runAllChecks(engagementId, tbVersionId) {
   const unmappedAmt = tbVersion?.rows
     ?.filter(r => !mappedSGs.has(r.subGrouping?.trim().toLowerCase()))
     ?.reduce((s, r) => s + Math.abs(Number(r.finalNet || 0)), 0) || 0;
-
+ 
   checks.push({
     engagementId, tbVersionId: tbVersion?.id,
     checkType: 'UNMAPPED_ITEMS',
@@ -54,13 +55,13 @@ async function runAllChecks(engagementId, tbVersionId) {
       : `⚠ ${unmappedSGs.length} sub-groupings unmapped — Amount excluded: ${unmappedAmt.toFixed(2)}`,
     detail: { unmapped: unmappedSGs, unmappedAmount: unmappedAmt, totalSGs: allSGs.length },
   });
-
+ 
   // ── 3. BS CROSS CASTING — Assets = Equity + Liabilities ───────────────────
   const totalAssets = bsLines.filter(l => l.assetLiability === 'Assets').reduce((s,l) => s + Number(l.totalFinalNet), 0);
   const totalEquity = bsLines.filter(l => l.assetLiability === 'Equity').reduce((s,l) => s + Number(l.totalFinalNet), 0);
   const totalLiab   = bsLines.filter(l => l.assetLiability === 'Liabilities').reduce((s,l) => s + Number(l.totalFinalNet), 0);
   const bsDiff      = Math.abs(totalAssets - totalEquity - totalLiab);
-
+ 
   checks.push({
     engagementId, tbVersionId: tbVersion?.id,
     checkType: 'CROSS_CASTING_BS',
@@ -70,14 +71,14 @@ async function runAllChecks(engagementId, tbVersionId) {
       : `✗ Balance Sheet difference: ${bsDiff.toFixed(2)} — Assets: ${totalAssets.toFixed(2)}, Equity: ${totalEquity.toFixed(2)}, Liabilities: ${totalLiab.toFixed(2)}`,
     detail: { totalAssets, totalEquity, totalLiab, difference: bsDiff },
   });
-
+ 
   // ── 4. P&L CROSS CASTING — Income - Expenses = Net Profit ────────────────
   const totalIncome   = plLines.filter(l => l.assetLiability === 'Income').reduce((s,l) => s + Number(l.totalFinalNet), 0);
   const totalExpenses = plLines.filter(l => l.assetLiability === 'Expenses').reduce((s,l) => s + Number(l.totalFinalNet), 0);
   const netProfit     = totalIncome - totalExpenses;
   const ociTotal      = ociLines.reduce((s,l) => s + Number(l.totalFinalNet), 0);
   const totalCI       = netProfit + ociTotal;
-
+ 
   checks.push({
     engagementId, tbVersionId: tbVersion?.id,
     checkType: 'CROSS_CASTING_PL',
@@ -85,16 +86,16 @@ async function runAllChecks(engagementId, tbVersionId) {
     message: `P&L: Revenue ${totalIncome.toFixed(2)} − Expenses ${totalExpenses.toFixed(2)} = Net Profit ${netProfit.toFixed(2)} | OCI: ${ociTotal.toFixed(2)} | Total Comprehensive Income: ${totalCI.toFixed(2)}`,
     detail: { totalIncome, totalExpenses, netProfit, ociTotal, totalCI },
   });
-
+ 
   // ── 5. CASTING CHECK — Note detail totals = FS line totals ───────────────
   const noteDetailsByNG = {};
   for (const d of noteDetails) {
     noteDetailsByNG[d.noteGroupId] = (noteDetailsByNG[d.noteGroupId] || 0) + Number(d.finalNet);
   }
-
+ 
   let castingPass = 0, castingFail = 0;
   const castingErrors = [];
-
+ 
   for (const line of fsLines) {
     if (!line.noteGroupId) continue;
     // Use SIGNED comparison — handles contra-assets (provision for bad debts = negative asset)
@@ -119,7 +120,7 @@ async function runAllChecks(engagementId, tbVersionId) {
       });
     }
   }
-
+ 
   checks.push({
     engagementId, tbVersionId: tbVersion?.id,
     checkType: 'CASTING',
@@ -129,7 +130,7 @@ async function runAllChecks(engagementId, tbVersionId) {
       : `✗ Casting errors in ${castingFail} notes — ${castingPass} passed`,
     detail: { passed: castingPass, failed: castingFail, errors: castingErrors },
   });
-
+ 
   // ── 6. RECONCILIATION — Retained Earnings + PAT = Closing RE ─────────────
   const retainedLine = bsLines.find(l =>
     l.assetLiability === 'Equity' &&
@@ -140,7 +141,7 @@ async function runAllChecks(engagementId, tbVersionId) {
     l.groupName?.toLowerCase().includes('profit') ||
     l.groupName?.toLowerCase().includes('loss for the year')
   );
-
+ 
   if (retainedLine && profitLine) {
     const openingRE  = Number(retainedLine.totalFinalNet) - Number(profitLine.totalFinalNet);
     const closingRE  = Number(retainedLine.totalFinalNet);
@@ -155,7 +156,7 @@ async function runAllChecks(engagementId, tbVersionId) {
       detail: { openingRE, profitForYear: Number(profitLine.totalFinalNet), closingRE, difference: reDiff },
     });
   }
-
+ 
   // ── 7. CASH RECONCILIATION — BS Cash = CFS Closing Cash ──────────────────
   const cashLine = bsLines.find(l => ['cash','bank'].some(k => l.groupName?.toLowerCase().includes(k)) && l.assetLiability === 'Assets');
   if (cashLine) {
@@ -167,13 +168,13 @@ async function runAllChecks(engagementId, tbVersionId) {
       detail: { bsCash: Number(cashLine.totalFinalNet), groupName: cashLine.groupName },
     });
   }
-
+ 
   // ── 8. COMPLETENESS — All FS lines have note groups ──────────────────────
   const incompleteLines = fsLines.filter(l =>
     l.sheet === 'BS' && !l.noteGroupId && !l.groupName?.startsWith('__')
   );
   const linesWithoutNotes = incompleteLines.length;
-
+ 
   // For each incomplete line, find its TB sub-groupings from mappings
   const incompleteDetail = incompleteLines.map(l => {
     const relatedMappings = mappings.filter(m => m.groupName === l.groupName);
@@ -185,7 +186,7 @@ async function runAllChecks(engagementId, tbVersionId) {
       fix:           `Go to Mapping page → find "${l.groupName}" → add a Note Group ID (e.g. NG-${l.groupName.toUpperCase().replace(/[^A-Z0-9]/g,'-').slice(0,15)})`,
     };
   });
-
+ 
   checks.push({
     engagementId, tbVersionId: tbVersion?.id,
     checkType: 'COMPLETENESS',
@@ -195,11 +196,11 @@ async function runAllChecks(engagementId, tbVersionId) {
       : `⚠ ${linesWithoutNotes} BS line${linesWithoutNotes>1?'s':''} missing note reference: ${incompleteLines.map(l=>l.groupName).join(', ')}`,
     detail: { linesWithoutNotes, lines: incompleteDetail },
   });
-
+ 
   // ── 9. SIGN CHECK — no negative assets or equity ─────────────────────────
   const negAssets = bsLines.filter(l => l.assetLiability === 'Assets' && Number(l.totalFinalNet) < -1 && !l.groupName?.toLowerCase().includes('provision'));
   const negEquity = bsLines.filter(l => l.assetLiability === 'Equity' && Number(l.totalFinalNet) < -1 && !l.groupName?.toLowerCase().includes('profit') && !l.groupName?.toLowerCase().includes('loss'));
-
+ 
   if (negAssets.length > 0 || negEquity.length > 0) {
     const allNeg = [
       ...negAssets.map(l => ({ name: l.groupName, type: 'Asset', amount: Number(l.totalFinalNet), fix: `"${l.groupName}" is classified as Asset but has negative value. Check if it should be a Liability instead.` })),
@@ -213,14 +214,14 @@ async function runAllChecks(engagementId, tbVersionId) {
       detail: { items: allNeg },
     });
   }
-
+ 
   // ── 10. METHOD-SPECIFIC CHECKS ──────────────────────────────────────────
   // Load engagement method
   const engRows = await prisma.$queryRawUnsafe(
     `SELECT e.method FROM "Engagement" e WHERE e.id = $1 LIMIT 1`, engagementId
   );
   const method = engRows[0]?.method || 'AS';
-
+ 
   // OCI check — required for IND_AS and IFRS, not for AS/IFRS_SME
   if (['IND_AS','IFRS'].includes(method)) {
     const hasOCI = ociLines.length > 0;
@@ -234,7 +235,7 @@ async function runAllChecks(engagementId, tbVersionId) {
       detail: { method, ociItems: ociLines.map(l => ({ name: l.groupName, amount: Number(l.totalFinalNet) })) },
     });
   }
-
+ 
   if (['AS','IFRS_SME'].includes(method)) {
     if (ociLines.length > 0) {
       checks.push({
@@ -246,7 +247,7 @@ async function runAllChecks(engagementId, tbVersionId) {
       });
     }
   }
-
+ 
   // Schedule III check — for AS and IND_AS
   if (['AS','IND_AS'].includes(method)) {
     const hasNCA = bsLines.some(l => l.assetLiability === 'Assets' &&
@@ -263,7 +264,7 @@ async function runAllChecks(engagementId, tbVersionId) {
       detail: { method, hasNonCurrentAssets: hasNCA, hasCurrentAssets: hasCA },
     });
   }
-
+ 
   // IFRS IAS 1 check — non-current/current split
   if (['IFRS','IFRS_SME'].includes(method)) {
     const hasNCA = bsLines.some(l => l.assetLiability === 'Assets' &&
@@ -282,7 +283,7 @@ async function runAllChecks(engagementId, tbVersionId) {
       detail: { method, hasNCA, hasCA, hasNCL },
     });
   }
-
+ 
   // Revenue recognition check — all methods
   if (totalIncome === 0 && plLines.length > 0) {
     checks.push({
@@ -293,7 +294,7 @@ async function runAllChecks(engagementId, tbVersionId) {
       detail: { plLineCount: plLines.length, totalIncome },
     });
   }
-
+ 
   // Save results via raw SQL to bypass enum type mismatch in DB
   await prisma.validationLog.deleteMany({ where: { engagementId } });
   for (const check of checks) {
@@ -312,15 +313,15 @@ async function runAllChecks(engagementId, tbVersionId) {
       console.warn('[ValidationLog insert]', e.message);
     }
   }
-
+ 
   return checks;
 }
-
+ 
 async function getValidationResults(engagementId) {
   return prisma.validationLog.findMany({
     where:   { engagementId },
     orderBy: { createdAt: 'desc' },
   });
 }
-
+ 
 module.exports = { runAllChecks, getValidationResults };
