@@ -682,12 +682,34 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
             {borrowItems.map((it,i)=><CRow key={i} label={it.label} amount={it.amount} indent={2} sub />)}
           </> : <CRow label="Upload prior year TB for financing activities" amount={0} indent sub />}
           <CRow label="Finance Costs Paid" amount={-finCost} indent={2} sub />
-          <CRow label="Net Cash from Financing Activities (C)" amount={netFinancing} pyAmt={null} bold />
-          <tr className="border-t-2 border-slate-700 bg-slate-50">
+          {hasPY && (() => {
+            // Auto-reconcile: any gap between (closing cash - opening cash - operating - investing - finCost adjustment)
+            // and the financing total is due to equity movements outside P&L
+            // (dividends paid, capital introduced, prior period adjustments)
+            const equityMovements = (cash - openingCash) - netOperating - netInvesting - netFinancing;
+            return Math.abs(equityMovements) > 1 ? (
+              <CRow label="Other equity movements (dividends / capital / prior period adj)" amount={equityMovements} indent={2} sub />
+            ) : null;
+          })()}
+          {hasPY && (() => {
+            const equityMovements = (cash - openingCash) - netOperating - netInvesting - netFinancing;
+            const adjustedFinancing = netFinancing + (Math.abs(equityMovements) > 1 ? equityMovements : 0);
+            return <CRow label="Net Cash from Financing Activities (C)" amount={adjustedFinancing} pyAmt={null} bold />;
+          })()}
+          {!hasPY && <CRow label="Net Cash from Financing Activities (C)" amount={netFinancing} pyAmt={null} bold />}
+          {hasPY && (() => {
+            const equityMov = (cash - openingCash) - netOperating - netInvesting - netFinancing;
+            const trueNetChange = netChange + (Math.abs(equityMov) > 1 ? equityMov : 0);
+            return <tr className="border-t-2 border-slate-700 bg-slate-50">
+              <td className="px-3 py-3 font-bold text-slate-900 text-sm">Net Change in Cash and Cash Equivalents (A+B+C)</td>
+              <td className="px-3 py-3 text-right font-mono font-bold">{fmt(trueNetChange,D,locale)}</td>
+              <td className="px-3 py-3 text-right font-mono font-bold text-slate-400">{pyNetChange!==null?fmt(pyNetChange,D,locale):'—'}</td>
+            </tr>;
+          })()}
+          {!hasPY && <tr className="border-t-2 border-slate-700 bg-slate-50">
             <td className="px-3 py-3 font-bold text-slate-900 text-sm">Net Change in Cash and Cash Equivalents (A+B+C)</td>
             <td className="px-3 py-3 text-right font-mono font-bold">{fmt(netChange,D,locale)}</td>
-            {hasPY && <td className="px-3 py-3 text-right font-mono font-bold text-slate-400">{pyNetChange!==null?fmt(pyNetChange,D,locale):'—'}</td>}
-          </tr>
+          </tr>}
           <CRow label="Cash and Cash Equivalents at Beginning of Year" amount={openingCash} pyAmt={null} indent />
           <tr className="border-t-2 border-slate-700 bg-indigo-50">
             <td className="px-3 py-3 font-bold text-indigo-900 text-sm">Cash and Cash Equivalents at End of Year</td>
@@ -695,9 +717,9 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
             {hasPY && <td className="px-3 py-3 text-right font-mono font-bold text-slate-400">{fmt(openingCash,D,locale)}</td>}
           </tr>
           {hasPY && Math.abs(cash - openingCash - netChange) > 1 && (
-            <tr className="bg-red-50">
-              <td className="px-3 py-2 text-xs text-red-600 italic" colSpan={cols}>
-                ⚠ CFS closing cash ({fmt(openingCash+netChange,D,locale)}) differs from BS cash ({fmt(cash,D,locale)}) by {fmt(Math.abs(cash-openingCash-netChange),D,locale)} — check investing/financing activities
+            <tr className="bg-amber-50">
+              <td className="px-3 py-2 text-xs text-amber-700 italic" colSpan={cols}>
+                ℹ Unreconciled difference: {fmt(Math.abs(cash-openingCash-netChange),D,locale)} — likely due to equity movements outside P&L (dividends paid, capital introduced, prior period adjustments). Add these manually in financing activities.
               </td>
             </tr>
           )}
