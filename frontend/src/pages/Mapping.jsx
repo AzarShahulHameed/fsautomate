@@ -1,9 +1,10 @@
+
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
 import { mappingAPI, fsAPI, notesAPI, tbAPI, exportAPI } from '../api/client';
 import { useStore } from '../store';
-
+ 
 const UNITS = [
   { label: 'Actual',     value: 1,        display: '' },
   { label: 'Hundreds',   value: 100,      display: '00s' },
@@ -12,13 +13,13 @@ const UNITS = [
   { label: 'Millions',   value: 1000000,  display: 'Millions' },
   { label: 'Crores',     value: 10000000, display: 'Crores' },
 ];
-
+ 
 function fmtAmt(n, divisor = 1) {
   const num = Number(n || 0) / divisor;
   const abs = Math.abs(num);
   return (num < 0 ? '-' : '') + Math.round(abs).toLocaleString('en-IN');
 }
-
+ 
 // Normalise FS head names: first letter capital, rest lowercase per word is too aggressive
 // for accounting terms. Instead: sentence case — only first character uppercase, rest preserved
 // but lowercased so "TRADE AND OTHER RECEIVABLES" → "Trade and other receivables"
@@ -28,17 +29,17 @@ function toSentenceCase(str) {
   const s = str.trim();
   return s.charAt(0).toUpperCase() + s.slice(1).toLowerCase();
 }
-
+ 
 // ── Searchable FS Head input with dropdown ────────────────────────────────────
 function FSHeadInput({ value, onChange, options, currency }) {
   const [query, setQuery]     = useState(value || '');
   const [open, setOpen]       = useState(false);
   const [filtered, setFiltered] = useState(options);
   const ref = useRef(null);
-
+ 
   // Sync external value
   useEffect(() => { setQuery(value || ''); }, [value]);
-
+ 
   // Deduplicate options (case-insensitive) and filter as user types
   useEffect(() => {
     // Dedup: keep first occurrence of each name when compared case-insensitively
@@ -55,7 +56,7 @@ function FSHeadInput({ value, onChange, options, currency }) {
       setFiltered(deduped.filter(o => o.toLowerCase().includes(query.toLowerCase())));
     }
   }, [query, options]);
-
+ 
   // Close on outside click
   useEffect(() => {
     const handler = (e) => {
@@ -64,19 +65,19 @@ function FSHeadInput({ value, onChange, options, currency }) {
     document.addEventListener('mousedown', handler);
     return () => document.removeEventListener('mousedown', handler);
   }, []);
-
+ 
   function select(opt) {
     setQuery(opt);
     onChange(opt);
     setOpen(false);
   }
-
+ 
   function handleInput(e) {
     setQuery(e.target.value);
     onChange(e.target.value);
     setOpen(true);
   }
-
+ 
   function handleKeyDown(e) {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -85,7 +86,7 @@ function FSHeadInput({ value, onChange, options, currency }) {
     }
     if (e.key === 'Escape') setOpen(false);
   }
-
+ 
   return (
     <div ref={ref} className="relative w-full">
       <input
@@ -128,16 +129,16 @@ function FSHeadInput({ value, onChange, options, currency }) {
     </div>
   );
 }
-
+ 
 export default function Mapping() {
   const { engagementId } = useParams();
   const { currentEngagement, currentClient, firm, getClientRegion, getCurrency, getCurrencySymbol } = useStore();
   const navigate = useNavigate();
-
+ 
   const method     = currentEngagement?.method || 'AS';
   const currency   = getCurrency();
   const currSymbol = getCurrencySymbol();
-
+ 
   const [tbRows,    setTbRows]    = useState([]);
   const [mappings,  setMappings]  = useState({});
   const [master,    setMaster]    = useState([]);
@@ -150,7 +151,7 @@ export default function Mapping() {
   const [unit,        setUnit]        = useState(UNITS[0]);
   const [customFSHeads, setCustomFSHeads] = useState([]);
   const masterCacheRef = useRef({ method: null, data: [] });
-
+ 
   const load = useCallback(async () => {
     setLoading(true);
     try {
@@ -163,7 +164,7 @@ export default function Mapping() {
             masterCacheRef.current = { method, data: list };
             return list;
           });
-
+ 
       const [latestTB, status, masterData] = await Promise.all([
         tbAPI.latest(engagementId),
         mappingAPI.status(engagementId),
@@ -177,9 +178,9 @@ export default function Mapping() {
     } catch { toast.error('Failed to load — make sure TB is uploaded first'); }
     finally { setLoading(false); }
   }, [engagementId, method]);
-
+ 
   useEffect(() => { load(); }, [load]);
-
+ 
   async function downloadFSGroupings() {
     try {
       const blob = await exportAPI.fsGroupings(method);
@@ -194,7 +195,7 @@ export default function Mapping() {
       toast.error('Download failed — ' + (err?.message || 'unknown error'));
     }
   }
-
+ 
   async function autoMap() {
     try {
       const res = await mappingAPI.autoMap(engagementId);
@@ -202,19 +203,19 @@ export default function Mapping() {
       load();
     } catch (err) { toast.error(err?.error || 'Auto-map failed'); }
   }
-
+ 
   async function saveMapping(subGrouping, data) {
     const payload = {
       subGrouping,
       ...data,
       groupName: data.groupName ? toSentenceCase(data.groupName) : data.groupName,
     };
-
+ 
     // Optimistic update — show immediately, revert on failure
     const previousState = mappings[subGrouping];
     setMappings(prev => ({ ...prev, [subGrouping]: { ...prev[subGrouping], ...payload, isSaved: true } }));
     setEditingRow(null);
-
+ 
     try {
       await mappingAPI.save(engagementId, payload);
       toast.success('Saved ✓');
@@ -225,12 +226,12 @@ export default function Mapping() {
       toast.error('Save failed — reverted');
     }
   }
-
+ 
   function generateNoteGroupId(groupName) {
     // Auto-generate a noteGroupId from the group name
     return 'NG-' + groupName.toUpperCase().replace(/[^A-Z0-9]/g, '-').replace(/-+/g, '-').slice(0, 20);
   }
-
+ 
   async function quickChangeGroup(subGrouping, groupName) {
     if (!groupName || groupName === '-- Select FS Head --') return;
     const normName  = toSentenceCase(groupName);
@@ -244,20 +245,24 @@ export default function Mapping() {
     };
     await saveMapping(subGrouping, data);
   }
-
+ 
   async function generateFS() {
     setGenerating(true);
-    try {
-      await fsAPI.generate(engagementId);
-      toast.success('Financial statements generated!');
-      // Generate notes in background — don't block navigation if it fails
-      notesAPI.generate(engagementId).catch(() => {});
-      navigate(`/engagements/${engagementId}/fs`);
-    } catch (err) {
-      toast.error(err?.error || err?.message || 'Generation failed — check mappings');
-    } finally { setGenerating(false); }
+    // Navigate first — the FS page shows a loading state and has its own Generate button.
+    // This ensures redirect happens even if the backend is slow or throws.
+    navigate(`/engagements/${engagementId}/fs`);
+    // Run generation in background after navigation
+    fsAPI.generate(engagementId)
+      .then(() => {
+        toast.success('Financial statements generated!');
+        notesAPI.generate(engagementId).catch(() => {});
+      })
+      .catch((err) => {
+        toast.error(err?.error || err?.message || 'Generation failed — check mappings');
+      })
+      .finally(() => setGenerating(false));
   }
-
+ 
   // Aggregate TB rows by subGrouping
   const subGroupTotals = {};
   tbRows.forEach(r => {
@@ -266,9 +271,9 @@ export default function Mapping() {
     subGroupTotals[sg].rows.push(r);
     subGroupTotals[sg].total += Number(r.finalNet || 0);
   });
-
+ 
   const allSubGroups = Object.values(subGroupTotals);
-
+ 
   // Combine master grouping names + any custom FS heads already used in this engagement
   // Deduplicate group names — merge same names with different casing into sentence case
   const masterGroupNames = master.map(m => toSentenceCase(m.groupName));
@@ -277,7 +282,7 @@ export default function Mapping() {
     .map(m => toSentenceCase(m.groupName));
   // Include custom FS heads added this session so they appear in dropdown immediately
   const uniqueGroups = [...new Set([...masterGroupNames, ...savedGroupNames, ...customFSHeads])].sort();
-
+ 
   const filtered = allSubGroups.filter(sg => {
     const isMapped = !!mappings[sg.subGrouping]?.groupName;
     if (filterStatus === 'mapped'   && !isMapped) return false;
@@ -289,12 +294,12 @@ export default function Mapping() {
     }
     return true;
   });
-
+ 
   const totalMapped   = allSubGroups.filter(sg => !!mappings[sg.subGrouping]?.groupName).length;
   const totalUnmapped = allSubGroups.length - totalMapped;
-
+ 
   if (loading) return <div className="p-8 text-slate-400">Loading TB data...</div>;
-
+ 
   return (
     <div className="p-6">
       {/* Header */}
@@ -323,13 +328,13 @@ export default function Mapping() {
           </button>
         </div>
       </div>
-
+ 
       {/* Filters */}
       <div className="flex gap-3 mb-4 flex-wrap items-center bg-slate-50 border border-slate-200 rounded-xl p-3">
         <input value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Search sub-grouping or FS head..."
           className="border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 w-64" />
-
+ 
         <div className="flex rounded-lg border border-slate-200 overflow-hidden text-sm">
           {[['all','All'],['mapped','Mapped'],['unmapped','Unmapped']].map(([val,label]) => (
             <button key={val} onClick={() => setFilterStatus(val)}
@@ -338,7 +343,7 @@ export default function Mapping() {
             </button>
           ))}
         </div>
-
+ 
         <div className="flex items-center gap-2 ml-auto">
           <span className="text-xs text-slate-500">Amounts in:</span>
           <select value={unit.value} onChange={e => setUnit(UNITS.find(u => u.value === Number(e.target.value)))}
@@ -351,7 +356,7 @@ export default function Mapping() {
           </select>
         </div>
       </div>
-
+ 
       {/* Table */}
       {filtered.length === 0 ? (
         <div className="text-center py-16 text-slate-400">
@@ -381,18 +386,18 @@ export default function Mapping() {
                 const mapping   = mappings[sg.subGrouping];
                 const isMapped  = !!mapping?.groupName;
                 const isEditing = editingRow === sg.subGrouping;
-
+ 
                 return (
                   <React.Fragment key={sg.subGrouping}>
                     <tr className={`hover:bg-slate-50 ${!isMapped ? 'bg-red-50' : ''}`}>
                       <td className="px-4 py-2.5 text-slate-400 text-xs">{idx+1}</td>
-
+ 
                       <td className="px-4 py-2.5">
                         <div className={`font-medium ${isMapped ? 'text-slate-800' : 'text-red-700'}`}>{sg.subGrouping}</div>
                         <div className="text-xs text-slate-400 mt-0.5">{sg.rows.length} ledger row{sg.rows.length > 1 ? 's' : ''}</div>
                         {!isMapped && <div className="text-xs text-red-500 mt-0.5">⚠ Not mapped</div>}
                       </td>
-
+ 
                       {/* FS Head — always searchable typeahead */}
                       <td className="px-4 py-2.5">
                         {isEditing ? (
@@ -411,7 +416,7 @@ export default function Mapping() {
                           />
                         )}
                       </td>
-
+ 
                       {/* Sub Group Name */}
                       <td className="px-4 py-2.5">
                         {isEditing ? (
@@ -422,7 +427,7 @@ export default function Mapping() {
                           <span className="text-slate-500 text-xs">{mapping?.subGroupName || '—'}</span>
                         )}
                       </td>
-
+ 
                       {/* Note Group */}
                       <td className="px-4 py-2.5">
                         {isEditing ? (
@@ -433,12 +438,12 @@ export default function Mapping() {
                           <span className="text-slate-500 text-xs">{mapping?.noteGroupId || '—'}</span>
                         )}
                       </td>
-
+ 
                       {/* Amount */}
                       <td className="px-4 py-2.5 text-right font-mono text-slate-800">
                         {fmtAmt(sg.total, unit.value)}
                       </td>
-
+ 
                       {/* Source */}
                       <td className="px-4 py-2.5 text-center">
                         {isMapped && (
@@ -447,7 +452,7 @@ export default function Mapping() {
                           </span>
                         )}
                       </td>
-
+ 
                       {/* Actions */}
                       <td className="px-4 py-2.5 text-center">
                         {isEditing ? (
@@ -465,7 +470,7 @@ export default function Mapping() {
                         )}
                       </td>
                     </tr>
-
+ 
                     {/* Expanded ledger rows when editing */}
                     {isEditing && sg.rows.map((row, ri) => (
                       <tr key={ri} className="bg-indigo-50 border-b border-indigo-100">
