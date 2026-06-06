@@ -55,35 +55,34 @@ enum ReportSectionType {
 
 // ── Models ────────────────────────────────────────────────────────────────────
 model Firm {
-  id              String          @id @default(uuid())
-  name            String
-  slug            String          @unique
-  plan            String          @default("starter")
-  isActive        Boolean         @default(true)
-  region          String          @default("India")
-  currency        String          @default("INR")
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  users           User[]
-  clients         Client[]
-  mappingMemories MappingMemory[] // ← ADDED: mapping intelligence layer
+  id         String   @id @default(uuid())
+  name       String
+  slug       String   @unique
+  plan       String   @default("starter")
+  isActive   Boolean  @default(true)
+  region     String   @default("India")
+  currency   String   @default("INR")
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+  users      User[]
+  clients    Client[]
 }
 
 model User {
-  id           String          @id @default(uuid())
+  id           String        @id @default(uuid())
   firmId       String
-  firm         Firm            @relation(fields: [firmId], references: [id])
+  firm         Firm          @relation(fields: [firmId], references: [id])
   email        String
   passwordHash String
   name         String
-  role         Role            @default(STAFF)
-  isActive     Boolean         @default(true)
+  role         Role          @default(STAFF)
+  isActive     Boolean       @default(true)
   avatar       String?
   phone        String?
   designation  String?
   lastLoginAt  DateTime?
-  createdAt    DateTime        @default(now())
-  updatedAt    DateTime        @updatedAt
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
   sessions     UserSession[]
   auditLogs    AuditLog[]
   engagements  EngagementUser[]
@@ -93,40 +92,38 @@ model User {
 }
 
 model UserSession {
-  id        String   @id @default(uuid())
-  userId    String
-  user      User     @relation(fields: [userId], references: [id])
-  token     String   @unique
-  pageState Json?
-  expiresAt DateTime
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id          String   @id @default(uuid())
+  userId      String
+  user        User     @relation(fields: [userId], references: [id])
+  token       String   @unique
+  pageState   Json?
+  expiresAt   DateTime
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
   @@index([token])
   @@index([userId])
 }
 
 model Client {
-  id              String          @id @default(uuid())
-  firmId          String
-  firm            Firm            @relation(fields: [firmId], references: [id])
-  name            String
-  cin             String?
-  gstin           String?
-  pan             String?
-  address         String?
-  email           String?
-  phone           String?
-  country         String          @default("India")
-  region          String          @default("India")
-  tradeLicense    String?
-  vatNumber       String?
-  isActive        Boolean         @default(true)
-  createdAt       DateTime        @default(now())
-  updatedAt       DateTime        @updatedAt
-  deletedAt    DateTime?
-  engagements     Engagement[]
-  mappingMemories MappingMemory[] // ← ADDED: client-specific mapping memory
+  id          String       @id @default(uuid())
+  firmId      String
+  firm        Firm         @relation(fields: [firmId], references: [id])
+  name        String
+  cin         String?
+  gstin       String?
+  pan         String?
+  address     String?
+  email       String?
+  phone       String?
+  country     String       @default("India")
+  region      String       @default("India")
+  tradeLicense String?
+  vatNumber   String?
+  isActive    Boolean      @default(true)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  engagements Engagement[]
 
   @@index([firmId])
 }
@@ -143,10 +140,6 @@ model Engagement {
   isLocked      Boolean  @default(false)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
-  deletedAt        DateTime?
-  status           String    @default("DRAFT")
-  statusUpdatedAt  DateTime?
-  statusUpdatedBy  String?
 
   users          EngagementUser[]
   tbVersions     TBVersion[]
@@ -249,11 +242,15 @@ model MasterGrouping {
   methodApplicability MethodApplicability @default(ALL)
   isActive            Boolean             @default(true)
   createdAt           DateTime            @default(now())
+  currentNonCurrent   String?
+  plCategory          String?
+  isCashItem          Boolean             @default(false)
 
   @@index([groupName])
   @@index([noteGroupId])
   @@index([methodApplicability])
   @@index([sheet])
+  @@index([plCategory])
 }
 
 model Mapping {
@@ -271,7 +268,6 @@ model Mapping {
   isSaved          Boolean    @default(true)
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
-  deletedAt    DateTime?
 
   @@unique([engagementId, subGrouping])
   @@index([engagementId])
@@ -287,7 +283,6 @@ model NoteGroup {
   isMandatory  Boolean    @default(false)
   createdAt    DateTime   @default(now())
   noteDetails  NoteDetail[]
-  noteContent  String?
 
   @@unique([engagementId, noteGroupId])
   @@index([engagementId])
@@ -312,23 +307,26 @@ model NoteDetail {
 }
 
 model FSLine {
-  id             String         @id @default(uuid())
-  engagementId   String
-  engagement     Engagement     @relation(fields: [engagementId], references: [id])
-  tbVersionId    String?
-  tbVersion      TBVersion?     @relation(fields: [tbVersionId], references: [id])
-  sheet          String
-  groupName      String
-  totalFinalNet  Decimal        @default(0) @db.Decimal(18,2)
-  noteGroupId    String?
-  displayOrder   Int            @default(0)
-  assetLiability AssetLiability @default(Assets)
-  isPriorYear    Boolean        @default(false) // ← ADDED: distinguishes CY vs PY lines
-  generatedAt    DateTime       @default(now())
+  id                String         @id @default(uuid())
+  engagementId      String
+  engagement        Engagement     @relation(fields: [engagementId], references: [id])
+  tbVersionId       String?
+  tbVersion         TBVersion?     @relation(fields: [tbVersionId], references: [id])
+  sheet             String
+  groupName         String
+  totalFinalNet     Decimal        @default(0) @db.Decimal(18,2)
+  noteGroupId       String?
+  displayOrder      Int            @default(0)
+  assetLiability    AssetLiability @default(Assets)
+  generatedAt       DateTime       @default(now())
+  isPriorYear       Boolean        @default(false)
+  currentNonCurrent String?
+  plCategory        String?
+  isCashItem        Boolean        @default(false)
 
   @@index([engagementId])
   @@index([sheet])
-  @@index([engagementId, isPriorYear]) // ← ADDED
+  @@index([engagementId, isPriorYear])
 }
 
 model ReportSection {
@@ -363,62 +361,20 @@ model ValidationLog {
 }
 
 model AuditLog {
-  id         String      @id @default(uuid())
+  id         String   @id @default(uuid())
   firmId     String
   userId     String?
-  user       User?       @relation(fields: [userId], references: [id])
+  user       User?    @relation(fields: [userId], references: [id])
   engagement Engagement? @relation(fields: [entityId], references: [id])
   action     String
   entityType String?
   entityId   String?
   ipAddress  String?
   userAgent  String?
-  createdAt  DateTime    @default(now())
+  createdAt  DateTime @default(now())
 
   @@index([firmId])
   @@index([userId])
-}
-
-// ── Mapping Memory — Learning Intelligence Layer ───────────────────────────────
-// Stores confirmed TB subGrouping → FS mapping associations.
-// Built automatically every time a user manually saves a mapping.
-// Used by auto-mapper before consulting MasterGrouping table.
-// Priority: client-specific entries > firm-wide entries > master table.
-model MappingMemory {
-  id               String   @id @default(uuid())
-
-  // Scope — firmId always set; clientId set for client-specific entries (null = firm-wide)
-  firmId           String
-  firm             Firm     @relation(fields: [firmId], references: [id])
-  clientId         String?
-  client           Client?  @relation(fields: [clientId], references: [id])
-
-  // The raw TB subGrouping text + its normalised form for matching
-  rawText          String
-  normalizedText   String
-
-  // The confirmed FS mapping this text resolves to
-  groupName        String
-  subGroupName     String?
-  subGroupNo       String?
-  noteGroupId      String?
-  masterGroupingId String?
-
-  // Memory is method-specific (AS mappings don't bleed into IFRS)
-  method           String
-
-  // Learning metadata — more confirmations = higher confidence
-  confirmCount     Int      @default(1)
-  lastConfirmedAt  DateTime @default(now())
-  lastEngagementId String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
-
-  // One entry per (firm, client?, normalizedText, method)
-  @@unique([firmId, clientId, normalizedText, method])
-  @@index([firmId, method])
-  @@index([firmId, clientId, method])
-  @@index([normalizedText])
 }
 
 // ── Schedules ─────────────────────────────────────────────────────────────────

@@ -280,15 +280,27 @@ async function generateFS(engagementId, firmId) {
   const masterGroupingIds = [...new Set(mappings.map(m => m.masterGroupingId).filter(Boolean))];
   let masterIndex = new Map();
   if (masterGroupingIds.length > 0) {
-    const masterRows = await prisma.masterGrouping.findMany({
-      where: { id: { in: masterGroupingIds } },
-      select: {
-        id: true, assetLiability: true, sheet: true,
-        displayOrder: true, noteGroupId: true,
-        currentNonCurrent: true, plCategory: true, isCashItem: true,
-      },
-    });
-    masterIndex = new Map(masterRows.map(r => [r.id, r]));
+    try {
+      // Full select including new metadata fields (requires schema.prisma update + prisma generate)
+      const masterRows = await prisma.masterGrouping.findMany({
+        where: { id: { in: masterGroupingIds } },
+        select: {
+          id: true, assetLiability: true, sheet: true,
+          displayOrder: true, noteGroupId: true,
+          currentNonCurrent: true, plCategory: true, isCashItem: true,
+        },
+      });
+      masterIndex = new Map(masterRows.map(r => [r.id, r]));
+    } catch (schemaErr) {
+      // Fallback: Prisma client not yet regenerated — select without new fields
+      // This happens when schema.prisma hasn't been deployed yet
+      console.warn('[FS] Falling back to basic MasterGrouping select (run prisma generate):', schemaErr.message);
+      const masterRows = await prisma.masterGrouping.findMany({
+        where: { id: { in: masterGroupingIds } },
+        select: { id: true, assetLiability: true, sheet: true, displayOrder: true, noteGroupId: true },
+      });
+      masterIndex = new Map(masterRows.map(r => [r.id, r]));
+    }
   }
 
   // ── Aggregate CY ──────────────────────────────────────────────────────────
