@@ -15,9 +15,7 @@ api.interceptors.request.use((config) => {
     const raw = localStorage.getItem('finstatement-auth');
     if (raw) {
       const { state } = JSON.parse(raw);
-      if (state?.token) {
-        config.headers.Authorization = `Bearer ${state.token}`;
-      }
+      if (state?.token) config.headers.Authorization = `Bearer ${state.token}`;
     }
   } catch (_) {}
   return config;
@@ -36,7 +34,6 @@ api.interceptors.response.use(
  
 export default api;
  
-// ─── Auth API ─────────────────────────────────────────────────────────────────
 export const authAPI = {
   login:          (data) => api.post('/auth/login', data),
   register:       (data) => api.post('/auth/register', data),
@@ -49,16 +46,14 @@ export const authAPI = {
   updateFirm:     (data) => api.patch('/auth/firm', data),
   forgotPassword: (email)           => api.post('/auth/forgot-password', { email }),
   resetPassword:  (token, password) => api.post('/auth/reset-password',  { token, password }),
-  invite:         (email, role)     => api.post('/auth/invite',          { email, role }),
+  invite:         (email, role)     => api.post('/auth/invite',           { email, role }),
   validateInvite: (token)           => api.get(`/auth/invite/${token}`),
-  acceptInvite:   (data)            => api.post('/auth/accept-invite',   data),
-  // User management (FIRM_ADMIN only)
-  listUsers:      ()           => api.get('/auth/users'),
-  changeRole:     (id, role)   => api.patch(`/auth/users/${id}/role`,       { role }),
-  deactivateUser: (id)         => api.patch(`/auth/users/${id}/deactivate`),
+  acceptInvite:   (data)            => api.post('/auth/accept-invite',    data),
+  listUsers:      ()                => api.get('/auth/users'),
+  changeRole:     (id, role)        => api.patch(`/auth/users/${id}/role`, { role }),
+  deactivateUser: (id)              => api.patch(`/auth/users/${id}/deactivate`),
 };
  
-// ─── Client API ───────────────────────────────────────────────────────────────
 export const clientAPI = {
   list:   ()         => api.get('/clients'),
   get:    (id)       => api.get(`/clients/${id}`),
@@ -67,25 +62,21 @@ export const clientAPI = {
   delete: (id)       => api.delete(`/clients/${id}`),
 };
  
-// ─── Engagement API ───────────────────────────────────────────────────────────
 export const engagementAPI = {
-  list:          (clientId) => api.get(`/engagements/client/${clientId}`),
-  get:           (id)       => api.get(`/engagements/${id}`),
-  create:        (clientId, data) => api.post('/engagements', { ...data, clientId }),
-  lock:          (id, lock) => api.patch(`/engagements/${id}/lock`, { lock }),
-  setStatus:     (id, status) => api.patch(`/engagements/${id}/status`, { status }),
-  delete:        (id)         => api.delete(`/engagements/${id}`),
-  validation:    (id)         => api.get(`/engagements/${id}/validation-checks`),
-  runValidation: (id)         => api.post(`/engagements/${id}/validation-checks`),
-  // User assignment
-  listEngagementUsers:   (eid)         => api.get(`/engagements/${eid}/users`),
-  assignUser:            (eid, userId, role) => api.post(`/engagements/${eid}/users`, { userId, role }),
-  removeEngagementUser:  (eid, userId) => api.delete(`/engagements/${eid}/users/${userId}`),
+  list:                (clientId)        => api.get(`/engagements/client/${clientId}`),
+  get:                 (id)              => api.get(`/engagements/${id}`),
+  create:              (clientId, data)  => api.post('/engagements', { ...data, clientId }),
+  lock:                (id, lock)        => api.patch(`/engagements/${id}/lock`, { lock }),
+  validation:          (id)              => api.get(`/engagements/${id}/validation-checks`),
+  runValidation:       (id)              => api.post(`/engagements/${id}/validation-checks`),
+  setStatus:           (id, status)      => api.patch(`/engagements/${id}/status`, { status }),
+  delete:              (id)              => api.delete(`/engagements/${id}`),
+  listEngagementUsers: (eid)             => api.get(`/engagements/${eid}/users`),
+  assignUser:          (eid, uid, role)  => api.post(`/engagements/${eid}/users`, { userId: uid, role }),
+  removeEngagementUser:(eid, uid)        => api.delete(`/engagements/${eid}/users/${uid}`),
 };
  
-// ─── Trial Balance API ────────────────────────────────────────────────────────
 export const tbAPI = {
-  // isPriorYear: boolean — determines whether this is a CY or PY upload
   upload: (eid, file, isPriorYear = false, label = null) => {
     const fd = new FormData();
     fd.append('file', file);
@@ -96,38 +87,33 @@ export const tbAPI = {
       timeout: 120000,
     });
   },
-  latest:       (eid)                         => api.get(`/tb/${eid}/latest`),
-  versions:     (eid)                         => api.get(`/tb/${eid}/versions`),
-  diff:         (eid, vid)                    => api.get(`/tb/${eid}/versions/${vid}/diff`),
-  previousYear: (eid)                         => api.get(`/tb/${eid}/previous-year`),
-  copyPriorYear:(eid, sourceEngagementId, label) =>
-    api.post(`/tb/${eid}/copy-prior-year`, { sourceEngagementId, label }),
+  latest:       (eid)                              => api.get(`/tb/${eid}/latest`),
+  versions:     (eid)                              => api.get(`/tb/${eid}/versions`),
+  diff:         (eid, vid)                         => api.get(`/tb/${eid}/versions/${vid}/diff`),
+  previousYear: (eid)                              => api.get(`/tb/${eid}/previous-year`),
+  copyPriorYear:(eid, sourceEngagementId, label)   => api.post(`/tb/${eid}/copy-prior-year`, { sourceEngagementId, label }),
 };
  
-// ─── Mapping API ──────────────────────────────────────────────────────────────
 export const mappingAPI = {
-  status:       (eid)              => api.get(`/mapping/${eid}/status`),
-  autoMap:      (eid)              => api.post(`/mapping/${eid}/auto`),
-  save:         (eid, data)        => api.put(`/mapping/${eid}/manual`, data),
-  master:       (method, search)   => api.get(`/mapping/master`, { params: { method, search } }),
-  copyFrom:  (eid, srcEid) => api.post(`/mapping/${eid}/copy-from/${srcEid}`),
-  deleteRow: (eid, sg)     => api.delete(`/mapping/${eid}/row/${encodeURIComponent(sg)}`),
+  status:   (eid)            => api.get(`/mapping/${eid}/status`),
+  autoMap:  (eid)            => api.post(`/mapping/${eid}/auto`),
+  save:     (eid, data)      => api.put(`/mapping/${eid}/manual`, data),
+  master:   (method, search) => api.get(`/mapping/master`, { params: { method, search } }),
+  copyFrom: (eid, srcEid)    => api.post(`/mapping/${eid}/copy-from/${srcEid}`),
+  deleteRow:(eid, sg)        => api.delete(`/mapping/${eid}/row/${encodeURIComponent(sg)}`),
 };
  
-// ─── Financial Statements API ─────────────────────────────────────────────────
 export const fsAPI = {
   generate: (eid) => api.post(`/fs/${eid}/generate`),
   get:      (eid) => api.get(`/fs/${eid}`),
 };
  
-// ─── Notes API ────────────────────────────────────────────────────────────────
 export const notesAPI = {
   generate:    (eid)            => api.post(`/notes/${eid}/generate`),
   get:         (eid)            => api.get(`/notes/${eid}`),
   saveContent: (eid, ngid, txt) => api.patch(`/notes/${eid}/${ngid}/content`, { noteContent: txt }),
 };
  
-// ─── Report API ───────────────────────────────────────────────────────────────
 export const reportAPI = {
   sections:    (eid)            => api.get(`/report/${eid}/sections`),
   saveSection: (eid, sid, data) => api.put(`/report/${eid}/sections/${sid}`, data),
@@ -135,7 +121,6 @@ export const reportAPI = {
   reorder:     (eid, order)    => api.patch(`/report/${eid}/sections/reorder`, { order }),
 };
  
-// ─── Export API (blob responses — bypass interceptor) ─────────────────────────
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
  
 function authHeader() {
@@ -149,67 +134,35 @@ function authHeader() {
   return {};
 }
  
- 
-// ─── Preferences API ─────────────────────────────────────────────────────────
-export const prefsAPI = {
-  get:  ()     => api.get('/preferences'),
-  save: (data) => api.patch('/preferences', data),
-};
- 
-// ─── OTP API ─────────────────────────────────────────────────────────────────
-export const otpAPI = {
-  send:   (type, target) => api.post('/otp/send',   { type, target }),
-  verify: (type, target, otp) => api.post('/otp/verify', { type, target, otp }),
-};
- 
-// ─── Upload API ───────────────────────────────────────────────────────────────
-// ─── Upload API ───────────────────────────────────────────────────────────────
-export const uploadAPI = {
-  avatar: (file) => {
-    const fd = new FormData();
-    fd.append('file', file);
-    return api.post('/upload/avatar', fd, {
-      headers: { 'Content-Type': 'multipart/form-data' },
-    });
-  },
-};
- 
 export const exportAPI = {
-  word:  (eid) => axios.get(
-    `${BASE}/api/export/${eid}/word`,
-    { responseType: 'blob', withCredentials: true, headers: authHeader() }
-  ).then(r => r.data),
-  excel: (eid) => axios.get(
-    `${BASE}/api/export/${eid}/excel`,
-    { responseType: 'blob', withCredentials: true, headers: authHeader() }
-  ).then(r => r.data),
- 
-  // Download FS Groupings master as CSV
+  word:  (eid) => axios.get(`${BASE}/api/export/${eid}/word`,  { responseType: 'blob', withCredentials: true, headers: authHeader() }).then(r => r.data),
+  excel: (eid) => axios.get(`${BASE}/api/export/${eid}/excel`, { responseType: 'blob', withCredentials: true, headers: authHeader() }).then(r => r.data),
   fsGroupings: (method) => {
     const token = authHeader()['Authorization'];
     return fetch(`${BASE}/api/mapping/master/download?method=${encodeURIComponent(method || '')}`, {
       headers: token ? { Authorization: token } : {},
       credentials: 'include',
-    }).then(r => {
-      if (!r.ok) throw new Error('Download failed');
-      return r.blob();
-    });
+    }).then(r => { if (!r.ok) throw new Error('Download failed'); return r.blob(); });
   },
 };
  
-// ─── Schedules API ─────────────────────────────────────────────────────────────
+export const uploadAPI = {
+  avatar: (file) => {
+    const fd = new FormData();
+    fd.append('file', file);
+    return api.post('/upload/avatar', fd, { headers: { 'Content-Type': 'multipart/form-data' } });
+  },
+};
+ 
 export const schedulesAPI = {
-  // PPE
   getPPE:            (eid)       => api.get(`/schedules/${eid}/ppe`),
   savePPE:           (eid,id,d)  => api.put(`/schedules/${eid}/ppe/${id}`, d),
   addPPE:            (eid,d)     => api.post(`/schedules/${eid}/ppe`, d),
   deletePPE:         (eid,id)    => api.delete(`/schedules/${eid}/ppe/${id}`),
-  // Intangibles
   getIntangibles:    (eid)       => api.get(`/schedules/${eid}/intangibles`),
   saveIntangible:    (eid,id,d)  => api.put(`/schedules/${eid}/intangibles/${id}`, d),
   addIntangible:     (eid,d)     => api.post(`/schedules/${eid}/intangibles`, d),
   deleteIntangible:  (eid,id)    => api.delete(`/schedules/${eid}/intangibles/${id}`),
-  // Related Party
   getRelatedParties: (eid)       => api.get(`/schedules/${eid}/related-parties`),
   addParty:          (eid,d)     => api.post(`/schedules/${eid}/related-parties`, d),
   updateParty:       (eid,id,d)  => api.put(`/schedules/${eid}/related-parties/${id}`, d),
@@ -217,40 +170,46 @@ export const schedulesAPI = {
   addTransaction:    (eid,pid,d) => api.post(`/schedules/${eid}/related-parties/${pid}/transactions`, d),
   updateTransaction: (eid,tid,d) => api.put(`/schedules/${eid}/transactions/${tid}`, d),
   deleteTransaction: (eid,tid)   => api.delete(`/schedules/${eid}/transactions/${tid}`),
-  // EPS
-  getEPS:            (eid)   => api.get(`/schedules/${eid}/eps`),
-  saveEPS:           (eid,d) => api.put(`/schedules/${eid}/eps`, d),
-  // Deferred Tax
-  getDeferredTax:    (eid)      => api.get(`/schedules/${eid}/deferred-tax`),
-  addDTItem:         (eid,d)    => api.post(`/schedules/${eid}/deferred-tax`, d),
-  saveDTItem:        (eid,id,d) => api.put(`/schedules/${eid}/deferred-tax/${id}`, d),
-  deleteDTItem:      (eid,id)   => api.delete(`/schedules/${eid}/deferred-tax/${id}`),
-  // Financial Instruments
-  getFinInstruments: (eid)   => api.get(`/schedules/${eid}/financial-instruments`),
-  saveFinInstruments:(eid,d) => api.put(`/schedules/${eid}/financial-instruments`, d),
-  // Contingencies
-  getContingencies:  (eid)      => api.get(`/schedules/${eid}/contingencies`),
-  addContingency:    (eid,d)    => api.post(`/schedules/${eid}/contingencies`, d),
-  saveContingency:   (eid,id,d) => api.put(`/schedules/${eid}/contingencies/${id}`, d),
-  deleteContingency: (eid,id)   => api.delete(`/schedules/${eid}/contingencies/${id}`),
+  getEPS:            (eid)       => api.get(`/schedules/${eid}/eps`),
+  saveEPS:           (eid,d)     => api.put(`/schedules/${eid}/eps`, d),
+  getDeferredTax:    (eid)       => api.get(`/schedules/${eid}/deferred-tax`),
+  addDTItem:         (eid,d)     => api.post(`/schedules/${eid}/deferred-tax`, d),
+  saveDTItem:        (eid,id,d)  => api.put(`/schedules/${eid}/deferred-tax/${id}`, d),
+  deleteDTItem:      (eid,id)    => api.delete(`/schedules/${eid}/deferred-tax/${id}`),
+  getFinInstruments: (eid)       => api.get(`/schedules/${eid}/financial-instruments`),
+  saveFinInstruments:(eid,d)     => api.put(`/schedules/${eid}/financial-instruments`, d),
+  getContingencies:  (eid)       => api.get(`/schedules/${eid}/contingencies`),
+  addContingency:    (eid,d)     => api.post(`/schedules/${eid}/contingencies`, d),
+  saveContingency:   (eid,id,d)  => api.put(`/schedules/${eid}/contingencies/${id}`, d),
+  deleteContingency: (eid,id)    => api.delete(`/schedules/${eid}/contingencies/${id}`),
 };
  
-// ─── Share Link API ────────────────────────────────────────────────────────────
+export const prefsAPI = {
+  get:  ()     => api.get('/preferences'),
+  save: (data) => api.patch('/preferences', data),
+};
+ 
+export const otpAPI = {
+  send:   (type, target)       => api.post('/otp/send',   { type, target }),
+  verify: (type, target, otp)  => api.post('/otp/verify', { type, target, otp }),
+};
+ 
 export const shareAPI = {
   create: (eid, expiryDays, label) => api.post(`/share/${eid}`, { expiryDays, label }),
   list:   (eid)                    => api.get(`/share/${eid}/links`),
   revoke: (token)                  => api.delete(`/share/links/${token}`),
 };
  
-// ─── Billing API ──────────────────────────────────────────────────────────────
 export const billingAPI = {
   plan:          ()            => api.get('/billing/plan'),
   createOrder:   (targetPlan) => api.post('/billing/create-order',   { targetPlan }),
-  verifyPayment: (data)       => api.post('/billing/verify-payment', data),
-  cancel:        ()           => api.post('/billing/cancel'),
+  verifyPayment: (data)        => api.post('/billing/verify-payment', data),
+  cancel:        ()            => api.post('/billing/cancel'),
 };
  
-// ─── Data Export API ──────────────────────────────────────────────────────────
 export const dataExportAPI = {
-  download: () => api.get('/data-export', { responseType: 'blob' }),
+  download: () => axios.get(`${BASE}/api/data-export`, {
+    responseType: 'blob', withCredentials: true, headers: authHeader()
+  }).then(r => r.data),
 };
+ 
