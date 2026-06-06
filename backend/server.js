@@ -1,12 +1,12 @@
 // server.js — FinStatement SaaS backend entry point
 'use strict';
-
+ 
 const express   = require('express');
 const helmet    = require('helmet');
 const cors      = require('cors');
 const rateLimit = require('express-rate-limit');
 const session   = require('express-session');
-
+ 
 const { prisma }          = require('./src/config/db');
 const { auditMiddleware } = require('./src/middleware/audit');
 const authRoutes          = require('./src/routes/auth.routes');
@@ -20,14 +20,13 @@ const reportRoutes        = require('./src/routes/report.routes');
 const exportRoutes        = require('./src/routes/export.routes');
 const schedulesRoutes     = require('./src/routes/schedules.routes');
 const uploadRoutes        = require('./src/routes/upload.routes');
-const taxonomyRoutes      = require('./src/routes/taxonomy.routes');
-
+ 
 const app  = express();
 const PORT = process.env.PORT || 4000;
-
+ 
 // Required for Render/Vercel reverse proxy — fixes rate limiting and cookies
 app.set('trust proxy', 1);
-
+ 
 // ─── Security headers ──────────────────────────────────────────────────────
 app.use(helmet({
   contentSecurityPolicy: {
@@ -39,7 +38,7 @@ app.use(helmet({
     },
   },
 }));
-
+ 
 // ─── CORS ──────────────────────────────────────────────────────────────────
 const allowedOrigins = [
   'http://localhost:5173',
@@ -64,11 +63,11 @@ app.use(cors({
 }));
 // Handle preflight for all routes
 app.options('*', cors());
-
+ 
 // ─── Body parsing ──────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
-
+ 
 // ─── Session (in-memory — no Redis needed) ─────────────────────────────────
 app.use(session({
   secret: process.env.SESSION_SECRET || 'finstatement-dev-secret',
@@ -82,17 +81,17 @@ app.use(session({
     maxAge:   8 * 60 * 60 * 1000, // 8 hours
   },
 }));
-
+ 
 // ─── Rate limiting ─────────────────────────────────────────────────────────
 app.use('/api/auth', rateLimit({ windowMs: 15 * 60 * 1000, max: 30, message: 'Too many auth attempts' }));
 app.use('/api', rateLimit({ windowMs: 60 * 1000, max: 500 }));
-
+ 
 // ─── Audit logging ─────────────────────────────────────────────────────────
 app.use(auditMiddleware);
-
+ 
 // ─── Health check ──────────────────────────────────────────────────────────
 app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
-
+ 
 // ─── API Routes ────────────────────────────────────────────────────────────
 app.use('/api/auth',        authRoutes);
 app.use('/api/clients',     clientRoutes);
@@ -105,11 +104,10 @@ app.use('/api/report',      reportRoutes);
 app.use('/api/export',      exportRoutes);
 app.use('/api/schedules',   schedulesRoutes);
 app.use('/api/upload',      uploadRoutes);
-app.use('/api/taxonomy',    taxonomyRoutes);
-
+ 
 // ─── 404 ───────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
-
+ 
 // ─── Global error handler ──────────────────────────────────────────────────
 app.use((err, _req, res, _next) => {
   console.error('[ERROR]', err.message);
@@ -118,10 +116,10 @@ app.use((err, _req, res, _next) => {
     code:  err.code    || 'INTERNAL_ERROR',
   });
 });
-
+ 
 // ─── Start ─────────────────────────────────────────────────────────────────
 app.listen(PORT, () => console.log(`[FinStatement API] Listening on port ${PORT}`));
-
+ 
 process.on('SIGTERM', async () => {
   await prisma.$disconnect();
   process.exit(0);
