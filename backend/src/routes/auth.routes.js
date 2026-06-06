@@ -1,3 +1,4 @@
+
 'use strict';
 const router  = require('express').Router();
 const { sendEmail, passwordResetHTML, inviteEmailHTML } = require('../services/email.service');
@@ -5,8 +6,8 @@ const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
 const { v4: uuid } = require('uuid');
 const { prisma } = require('../config/db');
-const { authGuard } = require('../middleware/tenant');
-
+const { authGuard, requireRole } = require('../middleware/tenant');
+ 
 router.post('/register', async (req, res, next) => {
   try {
     const { firmName, firmSlug, email, password, name, phone, designation, avatar, region } = req.body;
@@ -19,7 +20,7 @@ router.post('/register', async (req, res, next) => {
     const finalSlug = existingFirm
       ? slug + '-' + Date.now().toString(36).slice(-4) // append short unique suffix
       : slug;
-
+ 
     const firm = await prisma.firm.create({
       data: { name: firmName, slug: finalSlug, region: region || 'India', currency },
     });
@@ -32,18 +33,18 @@ router.post('/register', async (req, res, next) => {
     next(err);
   }
 });
-
+ 
 // In-memory login attempt tracker — resets on restart
 // For production: use Redis with TTL
 const loginAttempts = new Map(); // email -> { count, firstAt }
 const MAX_ATTEMPTS  = 10;
 const LOCKOUT_MS    = 15 * 60 * 1000; // 15 minutes
-
+ 
 router.post('/login', async (req, res, next) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
-
+ 
     // Brute force check
     const attemptKey = email.toLowerCase().trim();
     const attempt    = loginAttempts.get(attemptKey);
@@ -55,7 +56,7 @@ router.post('/login', async (req, res, next) => {
       }
       loginAttempts.delete(attemptKey); // lockout expired
     }
-
+ 
     const user = await prisma.user.findFirst({
       where: { email: email.toLowerCase().trim(), isActive: true },
       include: { firm: true },
@@ -66,7 +67,7 @@ router.post('/login', async (req, res, next) => {
       loginAttempts.set(attemptKey, { count: current.count + 1, firstAt: current.firstAt });
       return res.status(401).json({ error: 'Invalid email or password' });
     }
-
+ 
     // Successful login — clear attempts
     loginAttempts.delete(attemptKey);
     const token = jwt.sign({ userId: user.id, firmId: user.firmId }, process.env.JWT_SECRET, { expiresIn: '8h' });
@@ -79,7 +80,7 @@ router.post('/login', async (req, res, next) => {
     });
   } catch (err) { next(err); }
 });
-
+ 
 router.post('/logout', authGuard, async (req, res, next) => {
   try {
     const token = req.headers.authorization?.slice(7);
@@ -87,7 +88,7 @@ router.post('/logout', authGuard, async (req, res, next) => {
     res.json({ message: 'Logged out' });
   } catch (err) { next(err); }
 });
-
+ 
 router.get('/me', authGuard, (req, res) => {
   const u = req.user;
   res.json({
@@ -96,31 +97,31 @@ router.get('/me', authGuard, (req, res) => {
     firm: { id: u.firm?.id, name: u.firm?.name, region: u.firm?.region||'India', currency: u.firm?.currency||'INR' },
   });
 });
-
+ 
 router.patch('/page-state', authGuard, async (req, res, next) => {
   try {
     await prisma.userSession.update({ where: { id: req.sessionId }, data: { pageState: req.body.pageState } });
     res.json({ saved: true });
   } catch (err) { next(err); }
 });
-
+ 
 router.get('/page-state', authGuard, async (req, res, next) => {
   try {
     const s = await prisma.userSession.findUnique({ where: { id: req.sessionId } });
     res.json({ pageState: s?.pageState || null });
   } catch (err) { next(err); }
 });
-
+ 
 // PATCH /api/auth/profile
 router.patch('/profile', authGuard, async (req, res, next) => {
   try {
     const { name, phone, designation, avatar, email } = req.body;
     const now = new Date();
-
+ 
     const avatarVal = (avatar && avatar.trim().length > 0)
       ? avatar.trim()
       : req.user.avatar;
-
+ 
     // If email is changing, check it's not already taken by another user
     if (email && email !== req.user.email) {
       const existing = await prisma.$queryRawUnsafe(
@@ -129,9 +130,9 @@ router.patch('/profile', authGuard, async (req, res, next) => {
       );
       if (existing.length) return res.status(400).json({ error: 'Email already in use by another account' });
     }
-
+ 
     const emailVal = (email && email.trim().length > 0) ? email.toLowerCase().trim() : req.user.email;
-
+ 
     await prisma.$executeRawUnsafe(
       `UPDATE "User" SET name=$1, phone=$2, designation=$3, avatar=$4, email=$5, "updatedAt"=$6 WHERE id=$7`,
       name || req.user.name,
@@ -144,37 +145,37 @@ router.patch('/profile', authGuard, async (req, res, next) => {
     res.json({ message: 'Profile updated', avatar: avatarVal, email: emailVal });
   } catch (err) { next(err); }
 });
-
+ 
 // PATCH /api/auth/firm — update firm name and region
 router.patch('/firm', authGuard, async (req, res, next) => {
   try {
     const { name, region } = req.body;
     if (!name || !name.trim()) return res.status(400).json({ error: 'Firm name is required' });
-
+ 
     const currency = (region === 'UAE') ? 'AED' : 'INR';
     const now = new Date();
-
+ 
     await prisma.$executeRawUnsafe(
       `UPDATE "Firm" SET name=$1, region=$2, currency=$3, "updatedAt"=$4 WHERE id=$5`,
       name.trim(), region || 'India', currency, now, req.user.firmId
     );
-
+ 
     const updated = await prisma.$queryRawUnsafe(
       `SELECT id, name, slug, region, currency FROM "Firm" WHERE id=$1 LIMIT 1`,
       req.user.firmId
     );
-
+ 
     res.json({ message: 'Firm updated', firm: updated[0] });
   } catch (err) { next(err); }
 });
-
+ 
 // PATCH /api/auth/password
 router.patch('/password', authGuard, async (req, res, next) => {
   try {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) return res.status(400).json({ error: 'Current and new password required' });
     if (newPassword.length < 8) return res.status(400).json({ error: 'New password must be at least 8 characters' });
-
+ 
     const users = await prisma.$queryRawUnsafe(
       `SELECT "passwordHash" FROM "User" WHERE id=$1`, req.user.id
     );
@@ -190,30 +191,30 @@ router.patch('/password', authGuard, async (req, res, next) => {
     res.json({ message: 'Password changed' });
   } catch (err) { next(err); }
 });
-
+ 
 // ── In-memory stores (replace with Redis for multi-instance production) ──────
 const resetTokens   = new Map(); // token → { userId, email, expiresAt }
 const pendingInvites = new Map(); // token → { firmId, email, role, ... }
-
+ 
 // POST /api/auth/forgot-password
 router.post('/forgot-password', async (req, res, next) => {
   try {
     const { email } = req.body;
     if (!email) return res.status(400).json({ error: 'Email required' });
-
+ 
     const user = await prisma.user.findFirst({
       where:   { email: email.toLowerCase().trim(), isActive: true },
       include: { firm: true },
     });
     // Always return success — never reveal whether email exists
     if (!user) return res.json({ sent: true });
-
+ 
     const { randomBytes } = require('crypto');
     const token     = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
     resetTokens.set(token, { userId: user.id, email: user.email, expiresAt });
     setTimeout(() => resetTokens.delete(token), 30 * 60 * 1000);
-
+ 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     await sendEmail({
       to:      user.email,
@@ -223,18 +224,18 @@ router.post('/forgot-password', async (req, res, next) => {
     res.json({ sent: true });
   } catch (err) { next(err); }
 });
-
+ 
 // POST /api/auth/reset-password
 router.post('/reset-password', async (req, res, next) => {
   try {
     const { token, password } = req.body;
     if (!token || !password) return res.status(400).json({ error: 'Token and password required' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-
+ 
     const record = resetTokens.get(token);
     if (!record || record.expiresAt < new Date())
       return res.status(400).json({ error: 'Reset link expired or invalid. Request a new one.' });
-
+ 
     const bcrypt = require('bcryptjs');
     const hash   = await bcrypt.hash(password, 12);
     await prisma.user.update({ where: { id: record.userId }, data: { passwordHash: hash, updatedAt: new Date() } });
@@ -243,7 +244,7 @@ router.post('/reset-password', async (req, res, next) => {
     res.json({ reset: true });
   } catch (err) { next(err); }
 });
-
+ 
 // POST /api/auth/invite — send invite email
 router.post('/invite', authGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
   try {
@@ -251,20 +252,20 @@ router.post('/invite', authGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (r
     if (!email) return res.status(400).json({ error: 'Email required' });
     if (!['MANAGER','STAFF','VIEWER'].includes(role))
       return res.status(400).json({ error: 'Role must be MANAGER, STAFF, or VIEWER' });
-
+ 
     const existing = await prisma.user.findFirst({
       where: { email: email.toLowerCase().trim(), firmId: req.firmId, isActive: true },
     });
     if (existing) return res.status(409).json({ error: 'This email is already a member of your firm' });
-
+ 
     const firm = await prisma.firm.findUnique({ where: { id: req.firmId } });
-
+ 
     const { randomBytes } = require('crypto');
     const token     = randomBytes(32).toString('hex');
     const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
     pendingInvites.set(token, { firmId: req.firmId, firmSlug: firm.slug, firmName: firm.name, email: email.toLowerCase().trim(), role, inviterName: req.user.name, expiresAt });
     setTimeout(() => pendingInvites.delete(token), 48 * 60 * 60 * 1000);
-
+ 
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     await sendEmail({
       to:      email,
@@ -274,7 +275,7 @@ router.post('/invite', authGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (r
     res.json({ sent: true, email, role });
   } catch (err) { next(err); }
 });
-
+ 
 // GET /api/auth/invite/:token — validate before showing accept form
 router.get('/invite/:token', async (req, res, next) => {
   try {
@@ -284,34 +285,34 @@ router.get('/invite/:token', async (req, res, next) => {
     res.json({ valid: true, email: record.email, firmName: record.firmName, role: record.role });
   } catch (err) { next(err); }
 });
-
+ 
 // POST /api/auth/accept-invite — create account and join firm
 router.post('/accept-invite', async (req, res, next) => {
   try {
     const { token, name, password } = req.body;
     if (!token || !name || !password) return res.status(400).json({ error: 'Token, name and password required' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
-
+ 
     const record = pendingInvites.get(token);
     if (!record || record.expiresAt < new Date())
       return res.status(400).json({ error: 'Invite link expired. Ask for a new invitation.' });
-
+ 
     const existing = await prisma.user.findFirst({ where: { email: record.email, firmId: record.firmId } });
     if (existing) { pendingInvites.delete(token); return res.status(409).json({ error: 'Account already exists in this firm' }); }
-
+ 
     const bcrypt = require('bcryptjs');
     const jwt    = require('jsonwebtoken');
     const { v4: uuid } = require('uuid');
-
+ 
     const user = await prisma.user.create({
       data: { firmId: record.firmId, email: record.email, passwordHash: await bcrypt.hash(password, 12), name: name.trim(), role: record.role, isActive: true },
       include: { firm: true },
     });
     pendingInvites.delete(token);
-
+ 
     const jwtToken = jwt.sign({ userId: user.id, firmId: user.firmId }, process.env.JWT_SECRET, { expiresIn: '8h' });
     await prisma.userSession.create({ data: { id: uuid(), userId: user.id, token: jwtToken, expiresAt: new Date(Date.now() + 8*60*60*1000) } });
-
+ 
     res.status(201).json({
       token: jwtToken,
       user:  { id: user.id, name: user.name, email: user.email, role: user.role, firmId: user.firmId },
@@ -319,9 +320,9 @@ router.post('/accept-invite', async (req, res, next) => {
     });
   } catch (err) { next(err); }
 });
-
+ 
 // ── Firm user management ──────────────────────────────────────────────────────
-
+ 
 // GET /api/auth/users — list all users in firm
 router.get('/users', authGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
   try {
@@ -337,7 +338,7 @@ router.get('/users', authGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req
     res.json(users);
   } catch (err) { next(err); }
 });
-
+ 
 // PATCH /api/auth/users/:id/role — change a user's role
 router.patch('/users/:id/role', authGuard, requireRole('FIRM_ADMIN'), async (req, res, next) => {
   try {
@@ -355,7 +356,7 @@ router.patch('/users/:id/role', authGuard, requireRole('FIRM_ADMIN'), async (req
       where: { id: req.params.id, firmId: req.firmId },
     });
     if (!target) return res.status(404).json({ error: 'User not found in your firm' });
-
+ 
     await prisma.user.update({
       where: { id: req.params.id },
       data:  { role, updatedAt: new Date() },
@@ -363,7 +364,7 @@ router.patch('/users/:id/role', authGuard, requireRole('FIRM_ADMIN'), async (req
     res.json({ updated: true, role });
   } catch (err) { next(err); }
 });
-
+ 
 // PATCH /api/auth/users/:id/deactivate — deactivate/reactivate a user
 router.patch('/users/:id/deactivate', authGuard, requireRole('FIRM_ADMIN'), async (req, res, next) => {
   try {
@@ -374,24 +375,24 @@ router.patch('/users/:id/deactivate', authGuard, requireRole('FIRM_ADMIN'), asyn
       where: { id: req.params.id, firmId: req.firmId },
     });
     if (!target) return res.status(404).json({ error: 'User not found in your firm' });
-
+ 
     const isActive = !target.isActive; // toggle
     await prisma.user.update({
       where: { id: req.params.id },
       data:  { isActive, updatedAt: new Date() },
     });
-
+ 
     // If deactivating, invalidate all sessions
     if (!isActive) {
       await prisma.userSession.deleteMany({ where: { userId: req.params.id } });
     }
-
+ 
     res.json({ updated: true, isActive });
   } catch (err) { next(err); }
 });
-
+ 
 // ── Session management ────────────────────────────────────────────────────────
-
+ 
 // GET /api/auth/sessions — list all active sessions for current user
 router.get('/sessions', authGuard, async (req, res, next) => {
   try {
@@ -411,7 +412,7 @@ router.get('/sessions', authGuard, async (req, res, next) => {
     res.json(result);
   } catch (err) { next(err); }
 });
-
+ 
 // DELETE /api/auth/sessions/:id — revoke a specific session
 router.delete('/sessions/:id', authGuard, async (req, res, next) => {
   try {
@@ -421,7 +422,7 @@ router.delete('/sessions/:id', authGuard, async (req, res, next) => {
     res.json({ revoked: true });
   } catch (err) { next(err); }
 });
-
+ 
 // DELETE /api/auth/sessions — revoke all other sessions
 router.delete('/sessions', authGuard, async (req, res, next) => {
   try {
@@ -432,5 +433,5 @@ router.delete('/sessions', authGuard, async (req, res, next) => {
     res.json({ revoked: true });
   } catch (err) { next(err); }
 });
-
+ 
 module.exports = router;
