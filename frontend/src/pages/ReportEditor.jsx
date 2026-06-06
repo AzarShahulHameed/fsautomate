@@ -3,7 +3,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { reportAPI, exportAPI } from '../api/client';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
-
+ 
 // ── Section metadata ──────────────────────────────────────────────────────────
 const SECTION_META = {
   FIRST_PAGE:           { icon: '🏠', color: 'indigo', editorType: 'front_page',  desc: 'Company details, CIN, address, auditor name' },
@@ -16,7 +16,7 @@ const SECTION_META = {
   NOTES:                { icon: '📝', color: 'rose',   editorType: 'auto',        desc: 'Auto-generated from mapped TB data' },
   THANK_YOU:            { icon: '🙏', color: 'pink',   editorType: 'richtext',    desc: 'Closing page message' },
 };
-
+ 
 // ── Method-specific templates ─────────────────────────────────────────────────
 const TEMPLATES = {
   DIRECTOR_REPORT: {
@@ -217,13 +217,13 @@ const TEMPLATES = {
     IFRS: `<p>We thank all our stakeholders for their continued confidence and support in our growth journey.</p>`,
   },
 };
-
+ 
 function getTemplate(sectionType, method) {
   const methodTemplates = TEMPLATES[sectionType];
   if (!methodTemplates) return '';
   return methodTemplates[method] || methodTemplates['AS'] || '';
 }
-
+ 
 // ── Toolbar button ────────────────────────────────────────────────────────────
 function ToolBtn({ onClick, active, title, children }) {
   return (
@@ -236,12 +236,12 @@ function ToolBtn({ onClick, active, title, children }) {
     </button>
   );
 }
-
+ 
 // ── Rich Text Editor (ContentEditable) ───────────────────────────────────────
 function RichEditor({ value, onChange }) {
   const ref = useRef(null);
   const lastHtml = useRef(value);
-
+ 
   // Only update DOM if external change (avoid cursor jumping)
   useEffect(() => {
     if (ref.current && ref.current.innerHTML !== value) {
@@ -249,13 +249,13 @@ function RichEditor({ value, onChange }) {
       lastHtml.current = value;
     }
   }, [value]);
-
+ 
   const exec = (cmd, val) => {
     ref.current?.focus();
     document.execCommand(cmd, false, val);
     handleChange();
   };
-
+ 
   const handleChange = () => {
     const html = ref.current?.innerHTML || '';
     if (html !== lastHtml.current) {
@@ -263,11 +263,11 @@ function RichEditor({ value, onChange }) {
       onChange(html);
     }
   };
-
+ 
   const isActive = (cmd) => {
     try { return document.queryCommandState(cmd); } catch { return false; }
   };
-
+ 
   return (
     <div className="border border-slate-200 rounded-xl overflow-hidden flex flex-col" style={{ minHeight: '500px' }}>
       {/* Toolbar */}
@@ -310,7 +310,7 @@ function RichEditor({ value, onChange }) {
           ))}
         </select>
       </div>
-
+ 
       {/* Editor area */}
       <div
         ref={ref}
@@ -325,19 +325,19 @@ function RichEditor({ value, onChange }) {
     </div>
   );
 }
-
+ 
 // ── Front Page Form ───────────────────────────────────────────────────────────
 function FrontPageEditor({ value, onChange }) {
   const [form, setForm] = useState(() => {
     try { return JSON.parse(value || '{}'); } catch { return {}; }
   });
-
+ 
   const update = (field, val) => {
     const next = { ...form, [field]: val };
     setForm(next);
     onChange(JSON.stringify(next));
   };
-
+ 
   const fields = [
     { key: 'companyName', label: 'Company Name', placeholder: 'Acme Private Limited' },
     { key: 'cin', label: 'CIN', placeholder: 'U12345MH2020PTC123456' },
@@ -356,7 +356,7 @@ function FrontPageEditor({ value, onChange }) {
     { key: 'csName', label: 'Company Secretary Name (if applicable)', placeholder: 'CS Priya Mehta' },
     { key: 'csMembership', label: 'CS Membership No.', placeholder: 'A12345' },
   ];
-
+ 
   // Director entries (up to 2) — stored as JSON array in form.directors
   const directors = form.directors || [{ name:'', designation:'', din:'' }, { name:'', designation:'', din:'' }];
   function updateDirector(i, field, val) {
@@ -364,7 +364,7 @@ function FrontPageEditor({ value, onChange }) {
     updated[i] = { ...updated[i], [field]: val };
     update('directors', updated);
   }
-
+ 
   return (
     <div className="space-y-4">
       <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-3 text-sm text-indigo-700">
@@ -393,7 +393,7 @@ function FrontPageEditor({ value, onChange }) {
           </div>
         ))}
       </div>
-
+ 
       {/* Director signing fields */}
       <div className="mt-5 pt-5 border-t border-slate-200">
         <p className="text-sm font-semibold text-slate-700 mb-1">Signing Directors</p>
@@ -418,7 +418,7 @@ function FrontPageEditor({ value, onChange }) {
     </div>
   );
 }
-
+ 
 // ── Auto Section Preview ──────────────────────────────────────────────────────
 function AutoSectionPreview({ sectionType }) {
   return (
@@ -432,24 +432,26 @@ function AutoSectionPreview({ sectionType }) {
     </div>
   );
 }
-
+ 
 // ── Main Component ────────────────────────────────────────────────────────────
 export default function ReportEditor() {
   const { engagementId } = useParams();
   const navigate = useNavigate();
   const { currentEngagement } = useStore();
   const method = currentEngagement?.method || 'AS';
-
+ 
   const [sections, setSections]     = useState([]);
   const [activeId, setActiveId]     = useState(null);
   const [content, setContent]       = useState('');
-  const [saving, setSaving]         = useState(false);
+  const [saving,   setSaving]         = useState(false);
+  const [dragId,   setDragId]         = useState(null);
+  const [dragOver, setDragOver]       = useState(null);
   const [exporting, setExporting]   = useState('');
   const [loading, setLoading]       = useState(true);
   const autoSaveTimer               = useRef(null);
-
+ 
   useEffect(() => { load(); }, [engagementId]);
-
+ 
   async function load() {
     setLoading(true);
     try {
@@ -462,9 +464,9 @@ export default function ReportEditor() {
     } catch { toast.error('Failed to load report sections'); }
     finally { setLoading(false); }
   }
-
+ 
   const activeSection = sections.find(s => s.id === activeId);
-
+ 
   // Switch section
   function selectSection(s) {
     if (activeId === s.id) return;
@@ -473,7 +475,7 @@ export default function ReportEditor() {
     setActiveId(s.id);
     setContent(s.content || '');
   }
-
+ 
   // Auto-save on content change
   function handleContentChange(html) {
     setContent(html);
@@ -482,7 +484,7 @@ export default function ReportEditor() {
       if (activeId) saveSection(activeId, html, true);
     }, 2000);
   }
-
+ 
   async function saveSection(sectionId, html, silent = false) {
     if (!sectionId) return;
     if (!silent) setSaving(true);
@@ -494,38 +496,38 @@ export default function ReportEditor() {
     } catch { if (!silent) toast.error('Save failed'); }
     finally { if (!silent) setSaving(false); }
   }
-
+ 
   function handleDragStart(e, sectionId) {
     setDragId(sectionId);
     e.dataTransfer.effectAllowed = 'move';
   }
-
+ 
   function handleDragOver(e, sectionId) {
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
     setDragOver(sectionId);
   }
-
+ 
   async function handleDrop(e, targetId) {
     e.preventDefault();
     setDragOver(null);
     if (!dragId || dragId === targetId) { setDragId(null); return; }
-
+ 
     // Reorder locally first (optimistic)
     const ids  = sections.map(s => s.id);
     const from = ids.indexOf(dragId);
     const to   = ids.indexOf(targetId);
     if (from === -1 || to === -1) { setDragId(null); return; }
-
+ 
     const newOrder = [...ids];
     newOrder.splice(from, 1);
     newOrder.splice(to, 0, dragId);
-
+ 
     // Rebuild sections in new order
     const idMap = Object.fromEntries(sections.map(s => [s.id, s]));
     setSections(newOrder.map(id => idMap[id]).filter(Boolean));
     setDragId(null);
-
+ 
     // Persist to backend
     try {
       await reportAPI.reorder(engagementId, newOrder);
@@ -536,12 +538,12 @@ export default function ReportEditor() {
       setSections(Array.isArray(data) ? data.sort((a,b) => a.displayOrder - b.displayOrder) : []);
     }
   }
-
+ 
   function handleDragEnd() {
     setDragId(null);
     setDragOver(null);
   }
-
+ 
   async function toggleVisibility(section) {
     const next = !section.isVisible;
     setSections(prev => prev.map(s => s.id === section.id ? { ...s, isVisible: next } : s));
@@ -549,7 +551,7 @@ export default function ReportEditor() {
       await reportAPI.saveSection(engagementId, section.id, { isVisible: next });
     } catch { toast.error('Failed to update visibility'); }
   }
-
+ 
   function loadTemplate() {
     if (!activeSection) return;
     const tpl = getTemplate(activeSection.sectionType, method);
@@ -558,7 +560,7 @@ export default function ReportEditor() {
     setContent(tpl);
     handleContentChange(tpl);
   }
-
+ 
   async function downloadWord() {
     // Save current section first
     if (activeId) await saveSection(activeId, content, true);
@@ -575,7 +577,7 @@ export default function ReportEditor() {
     } catch (err) { toast.error(err?.error || 'Export failed'); }
     finally { setExporting(''); }
   }
-
+ 
   async function downloadExcel() {
     setExporting('excel');
     try {
@@ -590,19 +592,19 @@ export default function ReportEditor() {
     } catch (err) { toast.error(err?.error || 'Export failed'); }
     finally { setExporting(''); }
   }
-
+ 
   const sectionColor = (s) => {
     const meta = SECTION_META[s.sectionType];
     if (!s.isVisible) return 'opacity-50';
     if (s.id === activeId) return 'bg-indigo-600 text-white border-indigo-600';
     return 'bg-white text-slate-700 border-slate-200 hover:border-indigo-300 hover:bg-indigo-50';
   };
-
+ 
   if (loading) return <div className="p-8 text-slate-400">Loading report sections...</div>;
-
+ 
   return (
     <div className="flex h-full" style={{ height: 'calc(100vh - 64px)' }}>
-
+ 
       {/* ── Sidebar ─────────────────────────────────────────────────────────── */}
       <div className="w-72 flex-shrink-0 bg-slate-50 border-r border-slate-200 flex flex-col">
         {/* Header */}
@@ -610,7 +612,7 @@ export default function ReportEditor() {
           <h2 className="font-bold text-slate-800 text-sm">Report Builder</h2>
           <p className="text-xs text-slate-500 mt-0.5">{method} · {currentEngagement?.financialYear}</p>
         </div>
-
+ 
         {/* Section list */}
         <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
           {sections.map((s, i) => (
@@ -648,7 +650,7 @@ export default function ReportEditor() {
             </div>
           ))}
         </div>
-
+ 
         {/* Export buttons */}
         <div className="p-3 border-t border-slate-200 space-y-2">
           <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-2">Export</p>
@@ -662,7 +664,7 @@ export default function ReportEditor() {
           </button>
         </div>
       </div>
-
+ 
       {/* ── Editor Area ──────────────────────────────────────────────────────── */}
       <div className="flex-1 flex flex-col overflow-hidden bg-white">
         {activeSection ? (
@@ -695,7 +697,7 @@ export default function ReportEditor() {
                 </span>
               </div>
             </div>
-
+ 
             {/* Editor content */}
             <div className="flex-1 overflow-y-auto p-6">
               {SECTION_META[activeSection.sectionType]?.editorType === 'auto' ? (
@@ -706,7 +708,7 @@ export default function ReportEditor() {
                 <RichEditor value={content} onChange={handleContentChange} />
               )}
             </div>
-
+ 
             {/* Auto-save indicator */}
             <div className="px-6 py-2 border-t border-slate-100 bg-slate-50 flex items-center gap-2">
               <div className="w-1.5 h-1.5 rounded-full bg-green-500"></div>
@@ -725,3 +727,4 @@ export default function ReportEditor() {
     </div>
   );
 }
+ 
