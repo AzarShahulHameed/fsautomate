@@ -45,12 +45,12 @@ export const authAPI = {
   getPageState:   ()     => api.get('/auth/page-state'),
   updateProfile:  (data) => api.patch('/auth/profile', data),
   changePassword: (data) => api.patch('/auth/password', data),
-  updateFirm:     (data) => api.patch('/auth/firm', data),
+  updateFirm:     (data) => api.patch('/auth/firm', data),,
   forgotPassword: (email)           => api.post('/auth/forgot-password', { email }),
   resetPassword:  (token, password) => api.post('/auth/reset-password',  { token, password }),
   invite:         (email, role)     => api.post('/auth/invite',          { email, role }),
   validateInvite: (token)           => api.get(`/auth/invite/${token}`),
-  acceptInvite:   (data)            => api.post('/auth/accept-invite',   data),
+  acceptInvite:   (data)            => api.post('/auth/accept-invite',   data),,
   // User management (FIRM_ADMIN only)
   listUsers:      ()           => api.get('/auth/users'),
   changeRole:     (id, role)   => api.patch(`/auth/users/${id}/role`,       { role }),
@@ -75,7 +75,7 @@ export const engagementAPI = {
   setStatus:     (id, status) => api.patch(`/engagements/${id}/status`, { status }),
   delete:        (id)         => api.delete(`/engagements/${id}`),
   validation:    (id)         => api.get(`/engagements/${id}/validation-checks`),
-  runValidation: (id)         => api.post(`/engagements/${id}/validation-checks`),
+  runValidation: (id)         => api.post(`/engagements/${id}/validation-checks`),,
   // User assignment
   listEngagementUsers:   (eid)         => api.get(`/engagements/${eid}/users`),
   assignUser:            (eid, userId, role) => api.post(`/engagements/${eid}/users`, { userId, role }),
@@ -108,7 +108,7 @@ export const mappingAPI = {
   status:       (eid)              => api.get(`/mapping/${eid}/status`),
   autoMap:      (eid)              => api.post(`/mapping/${eid}/auto`),
   save:         (eid, data)        => api.put(`/mapping/${eid}/manual`, data),
-  master:       (method, search)   => api.get(`/mapping/master`, { params: { method, search } }),
+  master:       (method, search)   => api.get(`/mapping/master`, { params: { method, search } }),,
   copyFrom:  (eid, srcEid) => api.post(`/mapping/${eid}/copy-from/${srcEid}`),
   deleteRow: (eid, sg)     => api.delete(`/mapping/${eid}/row/${encodeURIComponent(sg)}`),
 };

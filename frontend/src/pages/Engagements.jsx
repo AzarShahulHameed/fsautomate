@@ -4,7 +4,7 @@ import { useStore } from '../store';
 import { engagementAPI, mappingAPI, authAPI } from '../api/client';
 import { ArrowRight, Building2, Calendar, BookOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
- 
+
 // Generate FY options dynamically from current year so they never go stale
 function buildFYOptions() {
   const now = new Date();
@@ -20,7 +20,7 @@ function buildFYOptions() {
   return { indiaOptions, uaeOptions };
 }
 const { indiaOptions, uaeOptions } = buildFYOptions();
- 
+
 // Region config — single source of truth
 const REGION_CONFIG = {
   India: {
@@ -40,13 +40,13 @@ const REGION_CONFIG = {
     fyOptions: uaeOptions,
   },
 };
- 
+
 function getClientRegion(client) {
   if (!client) return 'India';
   if (client.region === 'UAE' || client.country === 'UAE') return 'UAE';
   return 'India';
 }
- 
+
 const STATUS_CONFIG = {
   DRAFT:        { label: 'Draft',        color: 'bg-slate-100 text-slate-600',   next: 'IN_PROGRESS',  nextLabel: 'Start Work' },
   IN_PROGRESS:  { label: 'In Progress',  color: 'bg-blue-100 text-blue-700',     next: 'UNDER_REVIEW', nextLabel: 'Submit for Review' },
@@ -54,18 +54,18 @@ const STATUS_CONFIG = {
   LOCKED:       { label: 'Locked',       color: 'bg-emerald-100 text-emerald-700', next: 'FILED',      nextLabel: 'Mark as Filed' },
   FILED:        { label: 'Filed',        color: 'bg-purple-100 text-purple-700', next: null,           nextLabel: null },
 };
- 
+
 export default function Engagements() {
   const { clientId } = useParams();
   const { setCurrentEngagement, currentClient, firm } = useStore();
   const navigate = useNavigate();
- 
+
   // ── Team assignment panel ──────────────────────────────────────────────────
   const [teamPanel,     setTeamPanel]     = useState(null); // engagementId being managed
   const [firmUsers,     setFirmUsers]     = useState([]);
   const [assignedUsers, setAssignedUsers] = useState([]);
   const [teamLoading,   setTeamLoading]   = useState(false);
- 
+
   async function openTeamPanel(eng, e) {
     e.stopPropagation(); // don't navigate to engagement
     setTeamPanel(eng.id);
@@ -80,7 +80,7 @@ export default function Engagements() {
     } catch { toast.error('Failed to load team'); }
     finally { setTeamLoading(false); }
   }
- 
+
   async function toggleAssignment(engId, userId, isAssigned) {
     try {
       if (isAssigned) {
@@ -94,21 +94,21 @@ export default function Engagements() {
       toast.error(err?.error || err?.response?.data?.error || 'Failed');
     }
   }
- 
+
   const [engagements, setEngagements] = useState([]);
   const [showNew, setShowNew]         = useState(false);
- 
+
   // Derive region from client
   const clientRegion = getClientRegion(currentClient);
   const regionCfg    = REGION_CONFIG[clientRegion];
- 
+
   const [form, setForm] = useState({
     name:          '',
     method:        regionCfg.methods[0],
     financialYear: regionCfg.fyOptions[0],
     currency:      regionCfg.currency,
   });
- 
+
   // Reset form when client changes
   useEffect(() => {
     const cfg = REGION_CONFIG[clientRegion];
@@ -119,13 +119,13 @@ export default function Engagements() {
       currency:      cfg.currency,
     });
   }, [clientRegion]);
- 
+
   useEffect(() => {
     engagementAPI.list(clientId)
       .then(data => setEngagements(data))
       .catch(() => toast.error('Failed to load engagements'));
   }, [clientId]);
- 
+
   async function advanceStatus(engagement) {
     const cfg = STATUS_CONFIG[engagement.status || 'DRAFT'];
     if (!cfg?.next) return;
@@ -137,7 +137,7 @@ export default function Engagements() {
       toast.error(err?.error || err?.response?.data?.error || 'Status update failed');
     }
   }
- 
+
   async function deleteEngagement(id, name) {
     if (!window.confirm(`Delete "${name}"? This can be recovered by an admin.`)) return;
     try {
@@ -148,14 +148,14 @@ export default function Engagements() {
       toast.error(err?.error || err?.response?.data?.error || 'Delete failed');
     }
   }
- 
+
   async function copyMappings(targetId, sourceId) {
     try {
       const result = await mappingAPI.copyFrom(targetId, sourceId);
       toast.success(result?.message || `Copied ${result?.copied} mappings`);
     } catch { toast.error('Copy failed'); }
   }
- 
+
   async function create() {
     if (!form.name) { toast.error('Engagement name is required'); return; }
     try {
@@ -180,21 +180,21 @@ export default function Engagements() {
       }
     }
   }
- 
+
   function open(e) {
     setCurrentEngagement(e);
     navigate(`/engagements/${e.id}/tb`);
   }
- 
+
   
- 
+
 const methodBadgeColor = {
     AS: 'bg-blue-100 text-blue-700',
     IND_AS: 'bg-purple-100 text-purple-700',
     IFRS: 'bg-emerald-100 text-emerald-700',
     IFRS_SME: 'bg-amber-100 text-amber-700',
   };
- 
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-50 to-indigo-50/20 p-8">
       {/* Header */}
@@ -217,7 +217,7 @@ const methodBadgeColor = {
           <span className="text-lg">+</span> New Engagement
         </button>
       </div>
- 
+
       {/* New Engagement Form */}
       {showNew && (
         <div className="mb-8 bg-white border border-slate-200 rounded-3xl p-6 shadow-xl">
@@ -225,7 +225,7 @@ const methodBadgeColor = {
             <h3 className="font-bold text-slate-900 text-lg">New Engagement</h3>
             <button onClick={() => setShowNew(false)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
           </div>
- 
+
           {/* Region info banner */}
           <div className={`flex items-center gap-3 px-4 py-3 rounded-xl mb-5 ${clientRegion==='UAE'?'bg-emerald-50 border border-emerald-200':'bg-blue-50 border border-blue-200'}`}>
             <span className="text-2xl">{regionCfg.flag}</span>
@@ -234,7 +234,7 @@ const methodBadgeColor = {
               <p className="text-xs text-slate-500">Currency: {regionCfg.currency} · Available methods: {regionCfg.methods.join(', ')}</p>
             </div>
           </div>
- 
+
           <div className="grid grid-cols-2 gap-4">
             {/* Name */}
             <div className="col-span-2">
@@ -246,7 +246,7 @@ const methodBadgeColor = {
                 className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
               />
             </div>
- 
+
             {/* Method — only show methods for client's region */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">Accounting Method</label>
@@ -265,7 +265,7 @@ const methodBadgeColor = {
                 ))}
               </div>
             </div>
- 
+
             {/* Financial Year */}
             <div>
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">Financial Year</label>
@@ -274,7 +274,7 @@ const methodBadgeColor = {
                 className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 mb-3">
                 {regionCfg.fyOptions.map(y => <option key={y} value={y}>{y}</option>)}
               </select>
- 
+
               {/* Currency display */}
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <p className="text-xs text-slate-500 mb-1">Currency (auto from region)</p>
@@ -286,7 +286,7 @@ const methodBadgeColor = {
               </div>
             </div>
           </div>
- 
+
           <div className="flex gap-3 mt-5">
             <button onClick={create}
               className="px-5 py-2.5 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 shadow-md">
@@ -299,7 +299,7 @@ const methodBadgeColor = {
           </div>
         </div>
       )}
- 
+
       {/* Engagement list */}
       <div className="space-y-3">
         {engagements.map(e => (
@@ -359,7 +359,7 @@ const methodBadgeColor = {
           </div>
         )}
       </div>
- 
+
       {/* ── Team assignment panel ── */}
       {teamPanel && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
