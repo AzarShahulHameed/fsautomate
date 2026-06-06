@@ -1,18 +1,18 @@
-
 // src/routes/engagement.routes.js
 'use strict';
 const router = require('express').Router();
+const { enforceEngagementLimit } = require('../middleware/planGuard');
 const { authGuard, engagementGuard, requireRole } = require('../middleware/tenant');
 const { prisma } = require('../config/db');
- 
+
 router.use(authGuard);
- 
+
 router.get('/client/:clientId', async (req, res, next) => {
   try {
     // Verify client belongs to firm
     const client = await prisma.client.findFirst({ where: { id: req.params.clientId, firmId: req.firmId } });
     if (!client) return res.status(404).json({ error: 'Client not found' });
- 
+
     const engagements = await prisma.engagement.findMany({
       where: { clientId: req.params.clientId },
       orderBy: { createdAt: 'desc' },
@@ -23,25 +23,25 @@ router.get('/client/:clientId', async (req, res, next) => {
     res.json(engagements);
   } catch (err) { next(err); }
 });
- 
-router.post('/', async (req, res, next) => {
+
+router.post('/', enforceEngagementLimit, async (req, res, next) => {
   try {
     const { clientId, name, method, financialYear, currency } = req.body;
     const client = await prisma.client.findFirst({ where: { id: clientId, firmId: req.firmId } });
     if (!client) return res.status(404).json({ error: 'Client not found' });
- 
+
     const engagement = await prisma.engagement.create({
       data: { clientId, name, method, financialYear, currency: currency || 'INR' },
     });
- 
+
     // Create default report sections
     const sections = getDefaultSections(engagement.id, method);
     await prisma.reportSection.createMany({ data: sections });
- 
+
     res.status(201).json(engagement);
   } catch (err) { next(err); }
 });
- 
+
 router.get('/:engagementId', engagementGuard, async (req, res, next) => {
   try {
     const engagement = await prisma.engagement.findFirst({
@@ -55,14 +55,14 @@ router.get('/:engagementId', engagementGuard, async (req, res, next) => {
     res.json(engagement);
   } catch (err) { next(err); }
 });
- 
+
 router.patch('/:engagementId/lock', engagementGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
   try {
     await prisma.engagement.update({ where: { id: req.params.engagementId }, data: { isLocked: req.body.lock } });
     res.json({ locked: req.body.lock });
   } catch (err) { next(err); }
 });
- 
+
 // Get validation logs
 router.get('/:engagementId/validation', engagementGuard, async (req, res, next) => {
   try {
@@ -73,7 +73,7 @@ router.get('/:engagementId/validation', engagementGuard, async (req, res, next) 
     res.json(logs);
   } catch (err) { next(err); }
 });
- 
+
 function getDefaultSections(engagementId, method) {
   const base = [
     { engagementId, sectionType: 'FIRST_PAGE', title: 'Cover Page', displayOrder: 1 },
@@ -88,7 +88,7 @@ function getDefaultSections(engagementId, method) {
   ];
   return base;
 }
- 
+
 // GET /api/engagements/:engagementId/validation-checks
 const { getValidationResults } = require('../services/validation.service');
 router.get('/:engagementId/validation-checks', authGuard, engagementGuard, async (req, res, next) => {
@@ -97,7 +97,7 @@ router.get('/:engagementId/validation-checks', authGuard, engagementGuard, async
     res.json(results);
   } catch (err) { next(err); }
 });
- 
+
 // POST /api/engagements/:engagementId/validation-checks — run checks now
 const { runAllChecks: runChecksNow } = require('../services/validation.service');
 router.post('/:engagementId/validation-checks', authGuard, engagementGuard, async (req, res, next) => {
@@ -110,7 +110,7 @@ router.post('/:engagementId/validation-checks', authGuard, engagementGuard, asyn
     res.json(results);
   } catch (err) { next(err); }
 });
- 
+
 // PATCH /api/engagements/:engagementId/status — workflow transitions
 const VALID_TRANSITIONS = {
   DRAFT:        ['IN_PROGRESS'],
@@ -123,18 +123,18 @@ const STATUS_REQUIRES_ROLE = {
   LOCKED: ['FIRM_ADMIN', 'MANAGER'],
   FILED:  ['FIRM_ADMIN'],
 };
- 
+
 router.patch('/:engagementId/status', engagementGuard, async (req, res, next) => {
   try {
     const { status: newStatus } = req.body;
     if (!newStatus) return res.status(400).json({ error: 'status is required' });
- 
+
     const current = await prisma.engagement.findFirst({
-      where: { id: req.params.engagementId },
+      where: { id: req.params.engagementId, deletedAt: null },
       select: { status: true, isLocked: true },
     });
     if (!current) return res.status(404).json({ error: 'Engagement not found' });
- 
+
     const allowed = VALID_TRANSITIONS[current.status] || [];
     if (!allowed.includes(newStatus)) {
       return res.status(422).json({
@@ -142,32 +142,37 @@ router.patch('/:engagementId/status', engagementGuard, async (req, res, next) =>
         allowedTransitions: allowed,
       });
     }
- 
+
     // Role check for privileged transitions
     const requiredRoles = STATUS_REQUIRES_ROLE[newStatus];
     if (requiredRoles && !requiredRoles.includes(req.user.role)) {
       return res.status(403).json({ error: `Requires role: ${requiredRoles.join(' or ')}` });
     }
- 
+
     const isLocked = ['LOCKED', 'FILED'].includes(newStatus);
     await prisma.engagement.update({
       where: { id: req.params.engagementId },
-      data:  { status: newStatus, isLocked, statusUpdatedAt: new Date(), statusUpdatedBy: req.user.id },
+      data:  {
+        status:          newStatus,
+        isLocked,
+        statusUpdatedAt: new Date(),
+        statusUpdatedBy: req.user.id,
+      },
     });
- 
+
     res.json({ status: newStatus, isLocked });
   } catch (err) { next(err); }
 });
- 
+
 // DELETE /api/engagements/:engagementId — soft delete
 router.delete('/:engagementId', engagementGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
   try {
     const eng = await prisma.engagement.findFirst({
-      where: { id: req.params.engagementId },
+      where: { id: req.params.engagementId, deletedAt: null },
     });
     if (!eng) return res.status(404).json({ error: 'Engagement not found' });
     if (eng.isLocked) return res.status(403).json({ error: 'Cannot delete a locked engagement. Unlock first.' });
- 
+
     await prisma.engagement.update({
       where: { id: req.params.engagementId },
       data:  { deletedAt: new Date(), isActive: false },
@@ -175,5 +180,57 @@ router.delete('/:engagementId', engagementGuard, requireRole('FIRM_ADMIN', 'MANA
     res.json({ deleted: true, recoverable: true });
   } catch (err) { next(err); }
 });
- 
+
+// ── Engagement user assignment ─────────────────────────────────────────────────
+
+// GET /api/engagements/:engagementId/users — list assigned users
+router.get('/:engagementId/users', engagementGuard, async (req, res, next) => {
+  try {
+    const assigned = await prisma.engagementUser.findMany({
+      where:   { engagementId: req.params.engagementId },
+      include: {
+        user: {
+          select: { id:true, name:true, email:true, role:true, avatar:true, designation:true, isActive:true },
+        },
+      },
+      orderBy: { createdAt: 'asc' },
+    });
+    res.json(assigned.map(a => ({ ...a.user, assignedRole: a.role, assignedAt: a.createdAt })));
+  } catch (err) { next(err); }
+});
+
+// POST /api/engagements/:engagementId/users — assign a user
+router.post('/:engagementId/users', engagementGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
+  try {
+    const { userId, role = 'STAFF' } = req.body;
+    if (!userId) return res.status(400).json({ error: 'userId required' });
+
+    // Verify user belongs to same firm
+    const user = await prisma.user.findFirst({
+      where: { id: userId, firmId: req.firmId, isActive: true },
+      select: { id:true, name:true, email:true, role:true },
+    });
+    if (!user) return res.status(404).json({ error: 'User not found in your firm' });
+
+    const { v4: uuid } = require('uuid');
+    const assignment = await prisma.engagementUser.upsert({
+      where:  { engagementId_userId: { engagementId: req.params.engagementId, userId } },
+      update: { role },
+      create: { id: uuid(), engagementId: req.params.engagementId, userId, role },
+    });
+
+    res.status(201).json({ ...user, assignedRole: assignment.role, assignedAt: assignment.createdAt });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/engagements/:engagementId/users/:userId — remove a user
+router.delete('/:engagementId/users/:userId', engagementGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
+  try {
+    await prisma.engagementUser.deleteMany({
+      where: { engagementId: req.params.engagementId, userId: req.params.userId },
+    });
+    res.json({ removed: true });
+  } catch (err) { next(err); }
+});
+
 module.exports = router;

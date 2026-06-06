@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, useSearchParams } from 'react-router-dom';
 import { fsAPI } from '../api/client';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
@@ -827,12 +827,36 @@ function SOCEStatement({ bsLines, plLines, divisor, currSymbol, hasPY, locale = 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function FinancialStatements() {
   const { engagementId }          = useParams();
+  const [searchParams]            = useSearchParams();
+  const isPrintMode               = searchParams.get('print') === '1';
   const { currentEngagement, currentClient, firm } = useStore();
   const [data, setData]             = useState(null);
   const [hasPY, setHasPY]           = useState(false);
   const [loading, setLoading]       = useState(true);
   const [generating, setGenerating] = useState(false);
   const [tab, setTab]               = useState('BS');
+
+  // Print mode: inject CSS to hide navigation and format for A4
+  React.useEffect(() => {
+    if (!isPrintMode) return;
+    const style = document.createElement('style');
+    style.id    = 'fs-print-styles';
+    style.textContent = `
+      @media screen {
+        nav, aside, header, [data-print-hide], .no-print, button:not([data-print-show]) { display: none !important; }
+        body, html { background: white !important; }
+        .p-8, .px-8 { padding: 16px !important; }
+      }
+      @media print {
+        nav, aside, header, [data-print-hide], .no-print, button:not([data-print-show]) { display: none !important; }
+        body { -webkit-print-color-adjust: exact; print-color-adjust: exact; background: white; }
+        .print-break { page-break-before: always; }
+      }
+    `;
+    document.head.appendChild(style);
+    document.title = 'Financial Statements — Print';
+    return () => { const s = document.getElementById('fs-print-styles'); if (s) s.remove(); };
+  }, [isPrintMode]);
   const [hidden, setHidden]         = useState({});
   const [unit, setUnit]             = useState(UNITS[0]);
   const [cfsMethod, setCfsMethod]   = useState('indirect');

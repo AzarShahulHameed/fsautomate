@@ -346,9 +346,24 @@ function FrontPageEditor({ value, onChange }) {
     { key: 'address', label: 'Registered Office Address', placeholder: '123, Main Street, Mumbai - 400001' },
     { key: 'auditorName', label: 'Statutory Auditors', placeholder: 'M/s XYZ & Associates, Chartered Accountants' },
     { key: 'auditorReg', label: 'Auditor Firm Reg. No.', placeholder: '012345N' },
+    { key: 'auditorPartner', label: 'Signing Partner Name', placeholder: 'CA Rahul Sharma' },
+    { key: 'auditorMembership', label: 'Partner Membership No.', placeholder: '123456' },
+    { key: 'auditorPlace', label: 'Auditor Place of Signing', placeholder: 'Mumbai' },
     { key: 'bankers', label: 'Bankers', placeholder: 'State Bank of India, Mumbai' },
     { key: 'rta', label: 'Registrar & Transfer Agent', placeholder: 'Link Intime India Pvt Ltd' },
+    { key: 'place', label: 'Place of Signing', placeholder: 'Mumbai' },
+    { key: 'signDate', label: 'Date of Signing', placeholder: '31 March 2025' },
+    { key: 'csName', label: 'Company Secretary Name (if applicable)', placeholder: 'CS Priya Mehta' },
+    { key: 'csMembership', label: 'CS Membership No.', placeholder: 'A12345' },
   ];
+
+  // Director entries (up to 2) — stored as JSON array in form.directors
+  const directors = form.directors || [{ name:'', designation:'', din:'' }, { name:'', designation:'', din:'' }];
+  function updateDirector(i, field, val) {
+    const updated = [...directors];
+    updated[i] = { ...updated[i], [field]: val };
+    update('directors', updated);
+  }
 
   return (
     <div className="space-y-4">
@@ -375,6 +390,28 @@ function FrontPageEditor({ value, onChange }) {
                 className="w-full border border-slate-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
               />
             )}
+          </div>
+        ))}
+      </div>
+
+      {/* Director signing fields */}
+      <div className="mt-5 pt-5 border-t border-slate-200">
+        <p className="text-sm font-semibold text-slate-700 mb-1">Signing Directors</p>
+        <p className="text-xs text-slate-400 mb-3">Names, designations, and DINs appear in the signature block of the Word export.</p>
+        {[0, 1].map(i => (
+          <div key={i} className="mb-3 p-4 bg-slate-50 rounded-xl border border-slate-200">
+            <p className="text-xs font-bold text-slate-600 mb-3">Director {i + 1}</p>
+            <div className="grid grid-cols-3 gap-3">
+              {[['name','Full Name','e.g. Rahul Sharma'],['designation','Designation','Managing Director'],['din','DIN / Emirates ID','01234567']].map(([k,l,p])=>(
+                <div key={k}>
+                  <label className="block text-xs text-slate-500 mb-1">{l}</label>
+                  <input value={(form.directors||[])[i]?.[k]||''}
+                    onChange={e=>{const d=[...((form.directors)||[{},{},{}])];d[i]={...d[i],[k]:e.target.value};update('directors',d);}}
+                    placeholder={p}
+                    className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"/>
+                </div>
+              ))}
+            </div>
           </div>
         ))}
       </div>
@@ -458,6 +495,53 @@ export default function ReportEditor() {
     finally { if (!silent) setSaving(false); }
   }
 
+  function handleDragStart(e, sectionId) {
+    setDragId(sectionId);
+    e.dataTransfer.effectAllowed = 'move';
+  }
+
+  function handleDragOver(e, sectionId) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+    setDragOver(sectionId);
+  }
+
+  async function handleDrop(e, targetId) {
+    e.preventDefault();
+    setDragOver(null);
+    if (!dragId || dragId === targetId) { setDragId(null); return; }
+
+    // Reorder locally first (optimistic)
+    const ids  = sections.map(s => s.id);
+    const from = ids.indexOf(dragId);
+    const to   = ids.indexOf(targetId);
+    if (from === -1 || to === -1) { setDragId(null); return; }
+
+    const newOrder = [...ids];
+    newOrder.splice(from, 1);
+    newOrder.splice(to, 0, dragId);
+
+    // Rebuild sections in new order
+    const idMap = Object.fromEntries(sections.map(s => [s.id, s]));
+    setSections(newOrder.map(id => idMap[id]).filter(Boolean));
+    setDragId(null);
+
+    // Persist to backend
+    try {
+      await reportAPI.reorder(engagementId, newOrder);
+    } catch {
+      toast.error('Failed to save order — refreshing');
+      // Revert by reloading
+      const data = await reportAPI.sections(engagementId);
+      setSections(Array.isArray(data) ? data.sort((a,b) => a.displayOrder - b.displayOrder) : []);
+    }
+  }
+
+  function handleDragEnd() {
+    setDragId(null);
+    setDragOver(null);
+  }
+
   async function toggleVisibility(section) {
     const next = !section.isVisible;
     setSections(prev => prev.map(s => s.id === section.id ? { ...s, isVisible: next } : s));
@@ -530,12 +614,20 @@ export default function ReportEditor() {
         {/* Section list */}
         <div className="flex-1 overflow-y-auto p-3 space-y-1.5">
           {sections.map((s, i) => (
-            <div key={s.id} className="relative group">
+            <div key={s.id}
+              className={`relative group transition-all ${dragOver === s.id ? 'opacity-50 scale-[0.97]' : ''} ${dragId === s.id ? 'opacity-40' : ''}`}
+              draggable
+              onDragStart={e => handleDragStart(e, s.id)}
+              onDragOver={e => handleDragOver(e, s.id)}
+              onDrop={e => handleDrop(e, s.id)}
+              onDragEnd={handleDragEnd}
+            >
               <button
                 onClick={() => selectSection(s)}
                 className={`w-full text-left px-3 py-2.5 rounded-lg border text-sm transition-all ${sectionColor(s)}`}
               >
                 <div className="flex items-center gap-2">
+                  <span className="text-slate-300 cursor-grab active:cursor-grabbing mr-1" title="Drag to reorder">⠿</span>
                   <span className="text-base">{SECTION_META[s.sectionType]?.icon || '📄'}</span>
                   <div className="flex-1 min-w-0">
                     <div className="font-medium truncate">{s.title}</div>

@@ -10,7 +10,6 @@ import Layout              from './components/layout/Layout';
 import Login               from './pages/Login';
 import Register            from './pages/Register';
 import Settings from './pages/Settings';
-import OAuthCallback from './pages/OAuthCallback';
 import Dashboard           from './pages/Dashboard';
 import Clients             from './pages/Clients';
 import Engagements         from './pages/Engagements';
@@ -54,9 +53,13 @@ export default function App() {
       <PageStateRestorer />
       <Toaster position="top-right" toastOptions={{ duration: 4000 }} />
       <Routes>
-        <Route path="/login"    element={<Login />} />
-        <Route path="/oauth-callback" element={<OAuthCallback />} />
-        <Route path="/register" element={<Register />} />
+        <Route path="/login"           element={<Login />} />
+        <Route path="/register"        element={<Register />} />
+        <Route path="/forgot-password" element={<ForgotPassword />} />
+        <Route path="/reset-password"  element={<ResetPassword />} />
+        <Route path="/accept-invite"   element={<AcceptInvite />} />
+        <Route path="/audit-log"       element={<AuditLog />} />
+        <Route path="/view/:token"       element={<ClientPortal />} />
         <Route path="/" element={<PrivateRoute><Layout /></PrivateRoute>}>
           <Route index element={<Dashboard />} />
           <Route path="clients" element={<Clients />} />

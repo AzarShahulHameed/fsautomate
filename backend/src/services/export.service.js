@@ -516,6 +516,77 @@ function collapseNotes(details) {
 // ═══════════════════════════════════════════════════════════════════════════════
 // exportWord
 // ═══════════════════════════════════════════════════════════════════════════════
+// ── Signature Block ───────────────────────────────────────────────────────────
+function buildSignatureBlock(engagement, info, method, locale) {
+  const isUAE  = ['IFRS','IFRS_SME'].includes(method);
+  const cyDate = info.signDate || new Date().toLocaleDateString(locale==='en-US'?'en-US':'en-GB',{day:'numeric',month:'long',year:'numeric'});
+  const place  = info.place || (isUAE?'Dubai':'Mumbai');
+  const blank  = (n=28) => '─'.repeat(n);
+  const dirs   = Array.isArray(info.directors) ? info.directors : [];
+  const dir1   = dirs[0] || {};
+  const dir2   = dirs[1] || {};
+  const aud    = {
+    name: info.auditorName||'[Statutory Auditor]', reg: info.auditorReg||'[Firm Reg. No.]',
+    partner: info.auditorPartner||'[Partner Name]', mem: info.auditorMembership||'[M.No.]',
+    place: info.auditorPlace||place, date: info.auditorDate||cyDate,
+  };
+  const tr = (t,b=false,sz=18,c='1e293b') => new TextRun({text:String(t||''),bold:b,size:sz,color:c});
+  const mkCell = (lines,w) => new TableCell({
+    children: lines.map(l=>new Paragraph({children:[tr(l.t,l.b,l.sz||18,l.c||'1e293b')],spacing:{after:l.sa||60}})),
+    width:{size:w,type:WidthType.PERCENTAGE},
+    margins:{top:80,bottom:80,left:100,right:100},
+    borders:{top:{style:BorderStyle.NONE},bottom:{style:BorderStyle.NONE},left:{style:BorderStyle.NONE},right:{style:BorderStyle.NONE}},
+  });
+  const els = [pageBreak(), sectionTitle('Signatures'), new Paragraph({text:'',spacing:{after:400}})];
+  if (isUAE) {
+    els.push(
+      new Paragraph({children:[tr('For and on behalf of the Board of Directors',true,20,'475569')],spacing:{after:400}}),
+      new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[
+        new TableRow({children:[
+          mkCell([{t:blank(),sz:20,sa:300},{t:dir1.name||engagement.client?.name||'[Signatory]',b:true,sz:20,sa:80},{t:dir1.designation||'Authorised Signatory',c:'64748b',sa:60},{t:dir1.din?`ID: ${dir1.din}`:'',c:'94a3b8',sz:16}],50),
+          mkCell([{t:blank(),sz:20,sa:300},{t:aud.name,b:true,sz:20,sa:80},{t:`Firm Reg. No.: ${aud.reg}`,c:'64748b',sa:60},{t:`Per: ${aud.partner}`,sa:40},{t:`Membership No.: ${aud.mem}`,c:'94a3b8',sz:16}],50),
+        ]}),
+        new TableRow({children:[
+          mkCell([{t:`Place: ${place}`,c:'64748b',sz:16,sa:40},{t:`Date:  ${cyDate}`,c:'64748b',sz:16}],50),
+          mkCell([{t:`Place: ${aud.place}`,c:'64748b',sz:16,sa:40},{t:`Date:  ${aud.date}`,c:'64748b',sz:16}],50),
+        ]}),
+      ]}),
+    );
+  } else {
+    els.push(
+      new Paragraph({children:[tr(`For ${engagement.client?.name||'Company Name'}`,true,22)],spacing:{after:500}}),
+      new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[
+        new TableRow({children:[
+          mkCell([{t:blank(),sz:20,sa:300},{t:dir1.name||blank(16),b:true,sz:20,sa:80},{t:dir1.designation||'Director',c:'64748b',sa:60},{t:dir1.din?`DIN: ${dir1.din}`:`DIN: ${blank(10)}`,c:'94a3b8',sz:16}],33),
+          mkCell([{t:blank(),sz:20,sa:300},{t:dir2.name||blank(16),b:true,sz:20,sa:80},{t:dir2.designation||'Director',c:'64748b',sa:60},{t:dir2.din?`DIN: ${dir2.din}`:`DIN: ${blank(10)}`,c:'94a3b8',sz:16}],33),
+          mkCell([{t:blank(),sz:20,sa:300},{t:aud.name,b:true,sz:20,sa:80},{t:`Firm Reg. No.: ${aud.reg}`,c:'64748b',sa:60},{t:`Per: ${aud.partner}`,sa:40},{t:`M.No.: ${aud.mem}`,c:'94a3b8',sz:16}],34),
+        ]}),
+        new TableRow({children:[
+          mkCell([{t:`Place: ${place}`,c:'64748b',sz:16,sa:40},{t:`Date:  ${blank(12)}`,c:'64748b',sz:16}],33),
+          mkCell([{t:`Place: ${place}`,c:'64748b',sz:16,sa:40},{t:`Date:  ${blank(12)}`,c:'64748b',sz:16}],33),
+          mkCell([{t:`Place: ${aud.place}`,c:'64748b',sz:16,sa:40},{t:`Date:  ${blank(12)}`,c:'64748b',sz:16}],34),
+        ]}),
+      ]}),
+    );
+    if (info.csName) {
+      els.push(
+        new Paragraph({text:'',spacing:{after:400}}),
+        new Paragraph({children:[tr('Company Secretary',true,20,'475569')],spacing:{after:400}}),
+        new Table({width:{size:100,type:WidthType.PERCENTAGE},rows:[new TableRow({children:[
+          mkCell([{t:blank(),sz:20,sa:300},{t:info.csName,b:true,sz:20,sa:80},{t:'Company Secretary',c:'64748b',sa:60},{t:info.csMembership?`M.No.: ${info.csMembership}`:'',c:'94a3b8',sz:16}],40),
+          mkCell([{t:''}],60),
+        ]})]}),
+      );
+    }
+  }
+  els.push(
+    new Paragraph({text:'',spacing:{after:240}}),
+    new Paragraph({children:[tr(isUAE?'These financial statements were approved and authorised for issue on the date stated above.':'As per our report of even date. For and on behalf of the Board.',false,16,'94a3b8')],alignment:AlignmentType.CENTER}),
+  );
+  return els;
+}
+
+
 async function exportWord(engagementId, firmId) {
   const engRows = await prisma.$queryRawUnsafe(
     `SELECT e.*, c.name as "clientName", c.cin, c.pan, c.gstin,
@@ -552,7 +623,9 @@ async function exportWord(engagementId, firmId) {
   const cyPL  = cyFSLines.filter(l => l.sheet === 'PL'  && !l.groupName?.startsWith('__'));
   const cyOCI = cyFSLines.filter(l => l.sheet === 'OCI' && !l.groupName?.startsWith('__'));
   const { cyYear, pyYear } = deriveDates(eng.financialYear, isUAE);
-  const apSection = sections.find(s => s.sectionType === 'ACCOUNTING_POLICY');
+  const apSection    = sections.find(s => s.sectionType === 'ACCOUNTING_POLICY');
+  const fpSection    = sections.find(s => s.sectionType === 'FIRST_PAGE');
+  const info         = (() => { try { return JSON.parse(fpSection?.content||'{}'); } catch { return {}; } })();
 
   const structuredNotes = noteGroups
     .filter(ng => !ng.noteGroupId?.startsWith('__') && !ng.title?.startsWith('__'))
@@ -599,6 +672,7 @@ async function exportWord(engagementId, firmId) {
         children.push(new Paragraph({ text: '', spacing: { after: 1200 } }));
         children.push(new Paragraph({ children: [new TextRun({ text: section.content ? stripHtml(section.content) : 'Thank You', bold: true, size: 48, color: '6366f1' })], alignment: AlignmentType.CENTER, spacing: { after: 200 } }));
         children.push(new Paragraph({ children: [new TextRun({ text: `— ${engagement.client?.name || 'Company'} Management`, size: 24, color: '64748b' })], alignment: AlignmentType.CENTER }));
+        children.push(...buildSignatureBlock(engagement, info, method, locale));
         break;
     }
   }

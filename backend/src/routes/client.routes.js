@@ -1,11 +1,11 @@
-
 'use strict';
 const router = require('express').Router();
+const { enforceClientLimit } = require('../middleware/planGuard');
 const { authGuard, requireRole } = require('../middleware/tenant');
 const { prisma } = require('../config/db');
- 
+
 router.use(authGuard);
- 
+
 // GET all clients
 router.get('/', async (req, res, next) => {
   try {
@@ -27,15 +27,15 @@ router.get('/', async (req, res, next) => {
     next(err);
   }
 });
- 
+
 // POST create client
-router.post('/', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
+router.post('/', requireRole('FIRM_ADMIN', 'MANAGER'), enforceClientLimit, async (req, res, next) => {
   try {
     const { name, address, cin, pan, gstin, tradeLicense, vatNumber, region } = req.body;
     if (!name) return res.status(400).json({ error: 'Company name is required' });
- 
+
     const isUAE = region === 'UAE';
- 
+
     const client = await prisma.client.create({
       data: {
         firmId:  req.firmId,
@@ -47,7 +47,7 @@ router.post('/', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) =>
         address: address || null,
       },
     });
- 
+
     res.status(201).json({
       ...client,
       region:       isUAE ? 'UAE' : 'India',
@@ -59,7 +59,7 @@ router.post('/', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) =>
     next(err);
   }
 });
- 
+
 // GET single client
 router.get('/:id', async (req, res, next) => {
   try {
@@ -74,7 +74,7 @@ router.get('/:id', async (req, res, next) => {
     });
   } catch (err) { next(err); }
 });
- 
+
 // PUT update client
 router.put('/:id', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
   try {
@@ -93,7 +93,7 @@ router.put('/:id', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) 
     res.json({ saved: true });
   } catch (err) { next(err); }
 });
- 
+
 // DELETE /api/clients/:id — soft delete
 router.delete('/:id', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
   try {
@@ -101,12 +101,12 @@ router.delete('/:id', requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, nex
       where: { id: req.params.id, firmId: req.firmId, deletedAt: null },
     });
     if (!existing) return res.status(404).json({ error: 'Client not found' });
- 
+
     await prisma.client.update({
       where: { id: req.params.id },
     });
     res.json({ deleted: true, recoverable: true });
   } catch (err) { next(err); }
 });
- 
+
 module.exports = router;

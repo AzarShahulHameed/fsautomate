@@ -21,6 +21,13 @@ const exportRoutes        = require('./src/routes/export.routes');
 const schedulesRoutes     = require('./src/routes/schedules.routes');
 const uploadRoutes        = require('./src/routes/upload.routes');
 const oauthRoutes         = require('./src/routes/oauth.routes');
+const dashboardRoutes     = require('./src/routes/dashboard.routes');
+const auditRoutes         = require('./src/routes/audit.routes');
+const preferencesRoutes   = require('./src/routes/preferences.routes');
+const otpRoutes           = require('./src/routes/otp.routes');
+const billingRoutes       = require('./src/routes/billing.routes');
+const shareRoutes         = require('./src/routes/share.routes');
+const dataExportRoutes    = require('./src/routes/dataExport.routes');
 
 const app  = express();
 const PORT = process.env.PORT || 4000;
@@ -148,6 +155,14 @@ app.use('/api/export',      exportRoutes);
 app.use('/api/schedules',   schedulesRoutes);
 app.use('/api/upload',      uploadRoutes);
 app.use('/api/oauth',       oauthRoutes);
+app.use('/api/dashboard',   dashboardRoutes);
+app.use('/api/audit',       auditRoutes);
+app.use('/api/preferences', preferencesRoutes);
+app.use('/api/otp',         otpRoutes);
+app.use('/api/billing',     billingRoutes);
+app.use('/api/share',       shareRoutes);
+app.use('/api/public',      shareRoutes);   // public share view — no auth
+app.use('/api/data-export', dataExportRoutes);
 
 // ─── 404 ───────────────────────────────────────────────────────────────────
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));

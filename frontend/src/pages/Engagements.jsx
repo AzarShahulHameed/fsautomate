@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useStore } from '../store';
-import { engagementAPI, mappingAPI } from '../api/client';
+import { engagementAPI, mappingAPI, authAPI } from '../api/client';
 import { ArrowRight, Building2, Calendar, BookOpen } from 'lucide-react';
 import toast from 'react-hot-toast';
 
@@ -51,6 +51,41 @@ export default function Engagements() {
   const { clientId } = useParams();
   const { setCurrentEngagement, currentClient, firm } = useStore();
   const navigate = useNavigate();
+
+  // ── Team assignment panel ──────────────────────────────────────────────────
+  const [teamPanel,     setTeamPanel]     = useState(null); // engagementId being managed
+  const [firmUsers,     setFirmUsers]     = useState([]);
+  const [assignedUsers, setAssignedUsers] = useState([]);
+  const [teamLoading,   setTeamLoading]   = useState(false);
+
+  async function openTeamPanel(eng, e) {
+    e.stopPropagation(); // don't navigate to engagement
+    setTeamPanel(eng.id);
+    setTeamLoading(true);
+    try {
+      const [all, assigned] = await Promise.all([
+        authAPI.listUsers(),
+        engagementAPI.listEngagementUsers(eng.id),
+      ]);
+      setFirmUsers(all);
+      setAssignedUsers(assigned.map(u => u.id));
+    } catch { toast.error('Failed to load team'); }
+    finally { setTeamLoading(false); }
+  }
+
+  async function toggleAssignment(engId, userId, isAssigned) {
+    try {
+      if (isAssigned) {
+        await engagementAPI.removeEngagementUser(engId, userId);
+        setAssignedUsers(prev => prev.filter(id => id !== userId));
+      } else {
+        await engagementAPI.assignUser(engId, userId, 'STAFF');
+        setAssignedUsers(prev => [...prev, userId]);
+      }
+    } catch (err) {
+      toast.error(err?.error || err?.response?.data?.error || 'Failed');
+    }
+  }
 
   const [engagements, setEngagements] = useState([]);
   const [showNew, setShowNew]         = useState(false);
@@ -282,7 +317,33 @@ const methodBadgeColor = {
                 </div>
               </div>
             </div>
-            <ArrowRight size={16} className="text-slate-400 group-hover:text-indigo-500 transition-colors" />
+            <div className="flex items-center gap-2 flex-shrink-0" onClick={ev => ev.stopPropagation()}>
+              {/* Status badge */}
+              <span className={`text-xs px-2 py-1 rounded-full font-medium ${STATUS_CONFIG[e.status||'DRAFT']?.color||'bg-slate-100 text-slate-600'}`}>
+                {STATUS_CONFIG[e.status||'DRAFT']?.label||'Draft'}
+              </span>
+              {/* Advance status button */}
+              {STATUS_CONFIG[e.status||'DRAFT']?.next && !e.isLocked && (
+                <button
+                  onClick={() => advanceStatus(e)}
+                  className="text-xs px-2 py-1 rounded-lg border border-indigo-200 text-indigo-600 hover:bg-indigo-50 transition-colors font-medium"
+                  title={STATUS_CONFIG[e.status||'DRAFT']?.nextLabel}
+                >
+                  {STATUS_CONFIG[e.status||'DRAFT']?.nextLabel}
+                </button>
+              )}
+              {/* Team assign button */}
+              {['FIRM_ADMIN','MANAGER'].includes(user?.role) && (
+                <button
+                  onClick={ev => openTeamPanel(e, ev)}
+                  className="text-xs px-2 py-1 rounded-lg border border-slate-200 text-slate-500 hover:bg-slate-50 transition-colors"
+                  title="Manage team access"
+                >
+                  👥
+                </button>
+              )}
+              <ArrowRight size={16} className="text-slate-400 group-hover:text-indigo-500 transition-colors" />
+            </div>
           </button>
         ))}
         {engagements.length === 0 && (
@@ -296,6 +357,62 @@ const methodBadgeColor = {
             </button>
           </div>
         )}
+      </div>
+
+      {/* ── Team assignment panel ── */}
+      {teamPanel && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm p-4">
+          <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6">
+            <div className="flex items-center justify-between mb-5">
+              <h3 className="font-bold text-slate-800">Manage Team Access</h3>
+              <button onClick={() => setTeamPanel(null)} className="text-slate-400 hover:text-slate-600 text-xl">✕</button>
+            </div>
+            {teamLoading ? (
+              <div className="flex items-center justify-center py-8 gap-2 text-slate-400 text-sm">
+                <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"/>
+                Loading...
+              </div>
+            ) : (
+              <div className="space-y-2 max-h-80 overflow-y-auto">
+                {firmUsers.filter(u => u.id !== user?.id && u.isActive).map(u => {
+                  const isAssigned = assignedUsers.includes(u.id);
+                  return (
+                    <div key={u.id} className="flex items-center gap-3 p-2.5 rounded-xl hover:bg-slate-50 transition-colors">
+                      <div className="w-8 h-8 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-bold text-sm flex-shrink-0">
+                        {u.name?.charAt(0)?.toUpperCase()}
+                      </div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-sm font-medium text-slate-800 truncate">{u.name}</div>
+                        <div className="text-xs text-slate-400 truncate">{u.role.replace(/_/g,' ')}</div>
+                      </div>
+                      <button
+                        onClick={() => toggleAssignment(teamPanel, u.id, isAssigned)}
+                        className={`text-xs px-3 py-1.5 rounded-lg font-medium transition-colors ${
+                          isAssigned
+                            ? 'bg-emerald-100 text-emerald-700 hover:bg-red-50 hover:text-red-600'
+                            : 'bg-slate-100 text-slate-600 hover:bg-indigo-50 hover:text-indigo-600'
+                        }`}
+                      >
+                        {isAssigned ? '✓ Assigned' : '+ Assign'}
+                      </button>
+                    </div>
+                  );
+                })}
+                {firmUsers.filter(u => u.id !== user?.id && u.isActive).length === 0 && (
+                  <p className="text-sm text-slate-400 text-center py-4">No other team members. Invite someone from Settings → Team.</p>
+                )}
+              </div>
+            )}
+            <p className="text-xs text-slate-400 mt-4">
+              FIRM_ADMIN and MANAGER roles always have full access and don't need to be assigned.
+            </p>
+            <button onClick={() => setTeamPanel(null)}
+              className="w-full mt-4 py-2 bg-indigo-600 text-white text-sm rounded-xl hover:bg-indigo-700 font-medium">
+              Done
+            </button>
+          </div>
+        </div>
+      )}
       </div>
     </div>
   );

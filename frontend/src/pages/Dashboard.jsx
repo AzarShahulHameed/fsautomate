@@ -1,427 +1,313 @@
-import React, { useState, useEffect, useMemo } from 'react';
+// src/pages/Dashboard.jsx
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useStore } from '../store';
 import { clientAPI } from '../api/client';
+import api from '../api/client';
 
 const GREET = () => {
   const h = new Date().getHours();
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening';
 };
 
-const METHOD_META = {
-  AS:       { color: '#3b82f6', bg: '#eff6ff', border: '#bfdbfe', label: 'AS' },
-  IND_AS:   { color: '#8b5cf6', bg: '#f5f3ff', border: '#ddd6fe', label: 'Ind AS' },
-  IFRS:     { color: '#10b981', bg: '#ecfdf5', border: '#a7f3d0', label: 'IFRS' },
-  IFRS_SME: { color: '#f59e0b', bg: '#fffbeb', border: '#fde68a', label: 'IFRS SME' },
+const METHOD_COLOR = {
+  AS:       'bg-blue-100 text-blue-700 border-blue-200',
+  IND_AS:   'bg-purple-100 text-purple-700 border-purple-200',
+  IFRS:     'bg-emerald-100 text-emerald-700 border-emerald-200',
+  IFRS_SME: 'bg-amber-100 text-amber-700 border-amber-200',
 };
 
-function Avatar({ user }) {
-  if (user?.avatar) return (
-    <img src={user.avatar} alt={user?.name}
-      className="w-14 h-14 rounded-2xl object-cover ring-2 ring-white/30 shadow-md" />
-  );
+const STATUS_COLOR = {
+  DRAFT:        'bg-slate-100 text-slate-600',
+  IN_PROGRESS:  'bg-blue-100 text-blue-700',
+  UNDER_REVIEW: 'bg-amber-100 text-amber-700',
+  LOCKED:       'bg-emerald-100 text-emerald-700',
+  FILED:        'bg-purple-100 text-purple-700',
+};
+
+function timeAgo(date) {
+  const diff = (Date.now() - new Date(date).getTime()) / 1000;
+  if (diff < 60)   return 'just now';
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
+}
+
+function Avatar({ user, size = 9 }) {
+  if (user?.avatar) {
+    return <img src={user.avatar} alt={user.name} className={`w-${size} h-${size} rounded-full object-cover ring-2 ring-white/30 shadow-md`} />;
+  }
   return (
-    <div className="w-14 h-14 rounded-2xl bg-white/20 backdrop-blur flex items-center justify-center text-white font-bold text-xl">
+    <div className={`w-${size} h-${size} rounded-full bg-white/20 backdrop-blur flex items-center justify-center text-white font-bold text-sm ring-2 ring-white/30 flex-shrink-0`}>
       {user?.name?.charAt(0)?.toUpperCase() || 'U'}
     </div>
-  );
-}
-
-// Simple bar chart using SVG — no external lib needed
-function BarChart({ data, color = '#6366f1' }) {
-  if (!data?.length) return null;
-  const max = Math.max(...data.map(d => d.value), 1);
-  const H = 80;
-  return (
-    <div className="flex items-end gap-1.5 h-20">
-      {data.map((d, i) => (
-        <div key={i} className="flex flex-col items-center gap-1 flex-1">
-          <div
-            className="w-full rounded-t-md transition-all duration-700"
-            style={{
-              height: `${(d.value / max) * H}px`,
-              background: i === data.length - 1
-                ? color
-                : `${color}55`,
-              minHeight: d.value > 0 ? 4 : 0,
-            }}
-          />
-        </div>
-      ))}
-    </div>
-  );
-}
-
-// Donut chart using SVG
-function DonutChart({ segments, size = 80 }) {
-  const r = 30, cx = 40, cy = 40;
-  const circumference = 2 * Math.PI * r;
-  const total = segments.reduce((s, seg) => s + seg.value, 0) || 1;
-  let offset = 0;
-
-  return (
-    <svg width={size} height={size} viewBox="0 0 80 80">
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="#e2e8f0" strokeWidth="10" />
-      {segments.map((seg, i) => {
-        const dash = (seg.value / total) * circumference;
-        const gap  = circumference - dash;
-        const el = (
-          <circle key={i} cx={cx} cy={cy} r={r} fill="none"
-            stroke={seg.color} strokeWidth="10"
-            strokeDasharray={`${dash} ${gap}`}
-            strokeDashoffset={-offset}
-            style={{ transition: 'stroke-dasharray 0.6s ease' }}
-            transform="rotate(-90 40 40)"
-          />
-        );
-        offset += dash;
-        return el;
-      })}
-      <text x={cx} y={cy + 5} textAnchor="middle" fontSize="13" fontWeight="700" fill="#1e293b">
-        {segments.reduce((s, seg) => s + seg.value, 0)}
-      </text>
-    </svg>
   );
 }
 
 export default function Dashboard() {
   const { user, firm, currentEngagement, currentClient } = useStore();
   const navigate = useNavigate();
-  const [clients, setClients]   = useState([]);
-  const [loading, setLoading]   = useState(true);
-  const [now,     setNow]       = useState(new Date());
+  const [summary, setSummary] = useState(null);
+  const [clients, setClients] = useState([]);
+  const [loading, setLoading] = useState(true);
 
-  const region   = currentClient?.region || firm?.region || 'India';
-  const method   = currentEngagement?.method;
-  const currency = (method === 'IFRS' || method === 'IFRS_SME') ? 'AED'
-    : (method === 'AS' || method === 'IND_AS') ? 'INR'
-    : region === 'UAE' ? 'AED' : 'INR';
-  const flag = region === 'UAE' ? '🇦🇪' : '🇮🇳';
+  const region     = currentClient?.region || firm?.region || null;
+  const currency   = firm?.currency || (region === 'UAE' ? 'AED' : null);
+  const currSymbol = currency === 'AED' ? 'AED' : currency === 'INR' ? '₹' : null;
+  const flag       = region === 'UAE' ? '🇦🇪' : region === 'India' ? '🇮🇳' : null;
+  const method     = currentEngagement?.method || null;
 
   useEffect(() => {
-    clientAPI.list().then(c => setClients(Array.isArray(c) ? c : []))
-      .catch(() => setClients([])).finally(() => setLoading(false));
-    const t = setInterval(() => setNow(new Date()), 60000);
-    return () => clearInterval(t);
+    Promise.all([
+      fetch('/api/dashboard/summary', {
+        headers: { Authorization: `Bearer ${localStorage.getItem('token') || sessionStorage.getItem('token') || ''}` },
+      }).then(r => r.ok ? r.json() : null).catch(() => null),
+      clientAPI.list().catch(() => []),
+    ]).then(([sum, cls]) => {
+      setSummary(sum);
+      setClients(Array.isArray(cls) ? cls : []);
+      setLoading(false);
+    });
   }, []);
 
-  // Derive stats
-  const totalClients = clients.length;
-  const indiaClients = clients.filter(c => c.region !== 'UAE').length;
-  const uaeClients   = clients.filter(c => c.region === 'UAE').length;
-
-  // Method breakdown from clients
-  const methodCounts = useMemo(() => {
-    const counts = { AS: 0, IND_AS: 0, IFRS: 0, IFRS_SME: 0 };
-    // We don't have engagements loaded, show region-based estimate
-    if (indiaClients) { counts.AS = indiaClients; }
-    if (uaeClients)   { counts.IFRS = uaeClients; }
-    return counts;
-  }, [indiaClients, uaeClients]);
-
-  // Last 6 months simulated growth (based on real client count)
-  const months = ['Jan','Feb','Mar','Apr','May','Jun'];
-  const barData = months.map((m, i) => ({
-    label: m,
-    value: Math.max(0, Math.round(totalClients * (0.4 + (i * 0.12)))),
-  }));
-  barData[barData.length - 1].value = totalClients;
-
-  const donutSegments = [
-    { label: 'India', value: indiaClients, color: '#6366f1' },
-    { label: 'UAE',   value: uaeClients,   color: '#10b981' },
-  ].filter(s => s.value > 0);
-
-  if (!donutSegments.length) donutSegments.push({ label: 'No clients', value: 1, color: '#e2e8f0' });
-
-  const recentClients = [...clients].slice(0, 5);
-
-  const quickActions = [
-    { label: 'New Client',      icon: '🏢', desc: 'Add a new client',              to: '/clients',    color: '#6366f1' },
-    { label: 'Upload TB',       icon: '📊', desc: 'Upload trial balance',          to: currentEngagement ? `/engagements/${currentEngagement.id}/tb` : '/clients',     color: '#10b981' },
-    { label: 'Generate FS',     icon: '📄', desc: 'Generate financial statements', to: currentEngagement ? `/engagements/${currentEngagement.id}/fs` : '/clients',     color: '#f59e0b' },
-    { label: 'Run Validation',  icon: '✅', desc: 'Check for errors',              to: currentEngagement ? `/engagements/${currentEngagement.id}/validation` : '/clients', color: '#ef4444' },
+  // Quick action cards
+  const QUICK = [
+    { icon: '🏢', label: 'New Client',      sub: 'Register a client',      action: () => navigate('/clients'),  color: 'from-indigo-500 to-indigo-700' },
+    { icon: '📤', label: 'Upload TB',        sub: 'Upload trial balance',   action: () => currentEngagement ? navigate(`/engagements/${currentEngagement.id}/tb`)         : navigate('/clients'), color: 'from-purple-500 to-purple-700' },
+    { icon: '📊', label: 'View Statements',  sub: 'Financial statements',   action: () => currentEngagement ? navigate(`/engagements/${currentEngagement.id}/fs`)         : navigate('/clients'), color: 'from-blue-500 to-blue-700' },
+    { icon: '✅', label: 'Run Validation',   sub: 'Check casting & errors', action: () => currentEngagement ? navigate(`/engagements/${currentEngagement.id}/validation`) : navigate('/clients'), color: 'from-emerald-500 to-emerald-700' },
+    { icon: '⬇️', label: 'Export Report',    sub: 'Word / Excel / PDF',     action: () => currentEngagement ? navigate(`/engagements/${currentEngagement.id}/export`)     : navigate('/clients'), color: 'from-amber-500 to-amber-700' },
+    { icon: '👥', label: 'Manage Team',      sub: 'Invite & assign users',  action: () => navigate('/settings?tab=team'),                                                  color: 'from-pink-500 to-pink-700' },
   ];
+
+  const engByStatus  = summary?.engagements?.byStatus || {};
+  const recentEngs   = summary?.engagements?.recent   || [];
+  const activity     = summary?.activity               || [];
+  const totalClients = summary?.clients?.total ?? clients.length;
+  const totalEngs    = summary?.engagements?.total ?? 0;
+  const valFailures  = summary?.validation?.failures ?? 0;
+  const underReview  = engByStatus['UNDER_REVIEW'] || 0;
 
   return (
     <div className="min-h-screen bg-slate-50">
-
-      {/* ── Header banner ─────────────────────────────────────────── */}
-      <div className="relative overflow-hidden px-8 py-7"
-        style={{ background: 'linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #0f172a 100%)' }}>
-        {/* Decorative circles */}
-        <div className="absolute -right-20 -top-20 w-64 h-64 rounded-full opacity-10"
-          style={{ background: 'radial-gradient(circle, #6366f1, transparent)' }} />
-        <div className="absolute right-40 bottom-0 w-40 h-40 rounded-full opacity-10"
-          style={{ background: 'radial-gradient(circle, #8b5cf6, transparent)' }} />
-
-        <div className="relative z-10 flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <Avatar user={user} />
-            <div>
-              <p className="text-white/60 text-sm">{GREET()},</p>
-              <h1 className="text-white text-2xl font-bold leading-tight">{user?.name || 'Welcome'}</h1>
-              <p className="text-white/50 text-xs mt-0.5">
-                {firm?.name} · {now.toLocaleDateString('en-IN', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}
-              </p>
-            </div>
+      {/* Gradient header */}
+      <div className="bg-gradient-to-r from-indigo-700 via-indigo-600 to-purple-700 px-8 pt-8 pb-20">
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-indigo-200 text-sm">
+              {new Date().toLocaleDateString('en-GB', { weekday:'long', day:'numeric', month:'long', year:'numeric' })}
+            </p>
+            <h1 className="text-3xl font-bold text-white mt-1">
+              {GREET()}, {user?.name?.split(' ')[0]} 👋
+            </h1>
+            <p className="text-indigo-200 text-sm mt-1">
+              {firm?.name}{region && ` · ${flag} ${region}`}{currSymbol && ` · ${currSymbol}`}
+            </p>
           </div>
-
-          {/* Current engagement pill */}
-          {currentEngagement ? (
-            <div className="hidden md:flex flex-col items-end gap-1">
-              <div className="flex items-center gap-2 px-4 py-2 rounded-xl"
-                style={{ background: 'rgba(99,102,241,0.2)', border: '1px solid rgba(99,102,241,0.3)' }}>
-                <div className="w-2 h-2 rounded-full bg-indigo-400 animate-pulse" />
-                <span className="text-white text-sm font-semibold">{currentEngagement.name}</span>
-                <span className="px-2 py-0.5 rounded text-xs font-bold"
-                  style={{ background: 'rgba(99,102,241,0.4)', color: '#c7d2fe' }}>
-                  {currentEngagement.method}
-                </span>
-              </div>
-              <span className="text-white/40 text-xs">FY {currentEngagement.financialYear} · {currency}</span>
+          <div className="flex items-center gap-3 cursor-pointer" onClick={() => navigate('/settings')}>
+            <div className="text-right hidden sm:block">
+              <p className="text-white font-semibold text-sm">{user?.name}</p>
+              <p className="text-indigo-200 text-xs">{user?.role?.replace(/_/g,' ')}</p>
             </div>
-          ) : (
-            <button onClick={() => navigate('/clients')}
-              className="hidden md:flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold text-white transition-all"
-              style={{ background: 'rgba(99,102,241,0.3)', border: '1px solid rgba(99,102,241,0.4)' }}>
-              + Start New Engagement
-            </button>
-          )}
+            <Avatar user={user} />
+          </div>
         </div>
       </div>
 
-      <div className="px-8 py-6 space-y-6">
-
-        {/* ── KPI Cards ─────────────────────────────────────────────── */}
+      {/* Stat cards */}
+      <div className="px-8 -mt-12">
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           {[
-            {
-              label:   'Total Clients',
-              value:   loading ? '—' : totalClients,
-              sub:     `${indiaClients} India · ${uaeClients} UAE`,
-              icon:    '🏢',
-              color:   '#6366f1',
-              bg:      '#eef2ff',
-              trend:   '+' + totalClients,
-            },
-            {
-              label:   'Active Engagement',
-              value:   currentEngagement?.name || '—',
-              sub:     currentEngagement ? `${currentEngagement.method} · FY ${currentEngagement.financialYear}` : 'Select an engagement',
-              icon:    '📋',
-              color:   '#10b981',
-              bg:      '#ecfdf5',
-            },
-            {
-              label:   'Region',
-              value:   `${flag} ${region}`,
-              sub:     currency === 'AED' ? 'IFRS · IFRS SME' : 'AS · Ind AS',
-              icon:    '🌐',
-              color:   '#f59e0b',
-              bg:      '#fffbeb',
-            },
-            {
-              label:   'Standard',
-              value:   method || (region === 'UAE' ? 'IFRS' : 'AS'),
-              sub:     currentEngagement ? `FY ${currentEngagement.financialYear}` : 'No active engagement',
-              icon:    '📊',
-              color:   '#8b5cf6',
-              bg:      '#f5f3ff',
-            },
-          ].map((card, i) => (
-            <div key={i} className="bg-white border border-slate-200 rounded-2xl p-5 shadow-sm hover:shadow-md transition-all">
-              <div className="flex items-start justify-between mb-3">
-                <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl"
-                  style={{ background: card.bg }}>
-                  {card.icon}
-                </div>
-                {card.trend && (
-                  <span className="text-xs font-bold px-2 py-1 rounded-full"
-                    style={{ background: '#ecfdf5', color: '#059669' }}>
-                    {card.trend}
-                  </span>
-                )}
+            { label:'Total Clients',     value: loading ? '…' : String(totalClients), sub:'Active in your firm',             icon:'🏢', accent:'text-indigo-600' },
+            { label:'Total Engagements', value: loading ? '…' : String(totalEngs),    sub: `${underReview} under review`,   icon:'📂', accent:'text-purple-600' },
+            { label:'Validation Alerts', value: loading ? '…' : String(valFailures),  sub:'Failures in last 30 days',        icon: valFailures > 0 ? '⚠️' : '✅', accent: valFailures > 0 ? 'text-red-600' : 'text-emerald-600' },
+            { label:'Active Engagement', value: method || 'None selected',             sub: currentEngagement ? `FY ${currentEngagement.financialYear} · ${currentClient?.name||''}` : 'Select a client', icon:'📋', accent: method ? 'text-emerald-600' : 'text-slate-400' },
+          ].map((s, i) => (
+            <div key={i} className="bg-white rounded-2xl p-5 shadow-lg shadow-slate-200/50 border border-slate-100">
+              <div className="flex items-center justify-between mb-3">
+                <p className="text-xs font-bold text-slate-400 uppercase tracking-wider">{s.label}</p>
+                <span className="text-xl">{s.icon}</span>
               </div>
-              <p className="text-xs text-slate-400 font-medium uppercase tracking-wider mb-1">{card.label}</p>
-              <p className="text-xl font-bold text-slate-900 truncate">{card.value}</p>
-              <p className="text-xs text-slate-400 mt-0.5 truncate">{card.sub}</p>
+              <p className={`text-xl font-bold truncate ${s.accent}`}>{s.value}</p>
+              <p className="text-xs text-slate-400 mt-1 truncate">{s.sub}</p>
             </div>
           ))}
         </div>
+      </div>
 
-        {/* ── Charts Row ────────────────────────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* Main content */}
+      <div className="px-8 py-6 grid grid-cols-1 lg:grid-cols-3 gap-6">
 
-          {/* Client growth bar chart */}
-          <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <div className="flex items-center justify-between mb-5">
-              <div>
-                <h3 className="font-bold text-slate-900">Client Portfolio</h3>
-                <p className="text-xs text-slate-400 mt-0.5">Total clients over time</p>
-              </div>
-              <span className="text-2xl font-bold text-indigo-600">{totalClients}</span>
-            </div>
-            <BarChart data={barData} color="#6366f1" />
-            <div className="flex justify-between mt-2">
-              {barData.map((d, i) => (
-                <span key={i} className="text-xs text-slate-400 flex-1 text-center">{d.label}</span>
-              ))}
-            </div>
-          </div>
-
-          {/* Client distribution donut */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <h3 className="font-bold text-slate-900 mb-1">Distribution</h3>
-            <p className="text-xs text-slate-400 mb-5">By region</p>
-            <div className="flex flex-col items-center gap-4">
-              <DonutChart segments={donutSegments} size={100} />
-              <div className="w-full space-y-2">
-                {[
-                  { label: 'India 🇮🇳', value: indiaClients, color: '#6366f1' },
-                  { label: 'UAE 🇦🇪',   value: uaeClients,   color: '#10b981' },
-                ].map((s, i) => (
-                  <div key={i} className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <div className="w-2.5 h-2.5 rounded-full" style={{ background: s.color }} />
-                      <span className="text-xs text-slate-600">{s.label}</span>
-                    </div>
-                    <span className="text-xs font-bold text-slate-900">{s.value}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* ── Quick Actions + Recent Clients ────────────────────────── */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+        {/* Left col */}
+        <div className="lg:col-span-2 space-y-6">
 
           {/* Quick actions */}
-          <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-            <h3 className="font-bold text-slate-900 mb-4">Quick Actions</h3>
-            <div className="space-y-2">
-              {quickActions.map((a, i) => (
-                <button key={i} onClick={() => navigate(a.to)}
-                  className="w-full flex items-center gap-3 p-3 rounded-xl border border-slate-100 hover:border-slate-200 hover:bg-slate-50 transition-all text-left group">
-                  <div className="w-9 h-9 rounded-xl flex items-center justify-center text-lg flex-shrink-0"
-                    style={{ background: a.color + '15' }}>
-                    {a.icon}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+            <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-4">Quick Actions</h2>
+            <div className="grid grid-cols-3 sm:grid-cols-6 gap-3">
+              {QUICK.map((q, i) => (
+                <button key={i} onClick={q.action}
+                  className="flex flex-col items-center gap-2 p-3 rounded-xl border border-slate-100 hover:border-indigo-200 hover:shadow-md transition-all group bg-slate-50/50 hover:bg-white">
+                  <div className={`w-10 h-10 rounded-xl bg-gradient-to-br ${q.color} flex items-center justify-center text-lg shadow-sm group-hover:-translate-y-0.5 transition-transform`}>
+                    {q.icon}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-semibold text-slate-800 group-hover:text-indigo-700 transition-colors">{a.label}</p>
-                    <p className="text-xs text-slate-400 truncate">{a.desc}</p>
+                  <div className="text-center">
+                    <p className="text-xs font-bold text-slate-800 leading-tight">{q.label}</p>
                   </div>
-                  <svg className="w-4 h-4 text-slate-300 group-hover:text-indigo-400 transition-colors" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7"/>
-                  </svg>
                 </button>
               ))}
             </div>
           </div>
 
-          {/* Recent clients */}
-          <div className="lg:col-span-2 bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
+          {/* Recent engagements */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="font-bold text-slate-900">Recent Clients</h3>
-              <button onClick={() => navigate('/clients')}
-                className="text-xs text-indigo-600 font-semibold hover:text-indigo-700">
-                View all →
-              </button>
+              <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider">Recent Engagements</h2>
+              <button onClick={() => navigate('/clients')} className="text-xs text-indigo-600 hover:text-indigo-800 font-semibold">All clients →</button>
             </div>
             {loading ? (
-              <div className="space-y-3">
-                {[1,2,3].map(i => (
-                  <div key={i} className="h-14 bg-slate-100 rounded-xl animate-pulse" />
-                ))}
+              <div className="flex items-center gap-2 text-slate-400 text-sm py-4">
+                <div className="w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full animate-spin"/>
+                Loading...
               </div>
-            ) : recentClients.length === 0 ? (
-              <div className="flex flex-col items-center justify-center py-10 text-center">
-                <div className="text-4xl mb-3">🏢</div>
-                <p className="text-slate-600 font-semibold text-sm">No clients yet</p>
-                <p className="text-slate-400 text-xs mt-1 mb-4">Add your first client to get started</p>
-                <button onClick={() => navigate('/clients')}
-                  className="px-4 py-2 bg-indigo-600 text-white text-sm font-semibold rounded-xl hover:bg-indigo-700 transition-all">
-                  Add Client
-                </button>
+            ) : recentEngs.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-slate-400 text-sm">No engagements yet — add a client and create an engagement to get started.</p>
+                <button onClick={() => navigate('/clients')} className="mt-3 px-4 py-2 bg-indigo-600 text-white text-xs rounded-lg hover:bg-indigo-700">+ Add Client</button>
               </div>
             ) : (
-              <div className="divide-y divide-slate-100">
-                {recentClients.map((client, i) => {
-                  const isUAE  = client.region === 'UAE';
-                  const idText = isUAE ? client.tradeLicense : client.cin;
-                  return (
-                    <div key={i}
-                      onClick={() => navigate('/clients')}
-                      className="flex items-center gap-3 py-3 cursor-pointer hover:bg-slate-50 -mx-2 px-2 rounded-xl transition-all group">
-                      <div className="w-10 h-10 rounded-xl flex items-center justify-center text-xl flex-shrink-0"
-                        style={{ background: isUAE ? '#ecfdf5' : '#eef2ff' }}>
-                        {isUAE ? '🇦🇪' : '🇮🇳'}
-                      </div>
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-semibold text-slate-800 group-hover:text-indigo-700 transition-colors truncate">
-                          {client.name}
-                        </p>
-                        <p className="text-xs text-slate-400 truncate">
-                          {idText || 'No ID'} · {client.email || client.phone || client.region}
-                        </p>
-                      </div>
-                      <div className="flex-shrink-0">
-                        <span className="px-2.5 py-1 rounded-full text-xs font-bold"
-                          style={{
-                            background: isUAE ? '#ecfdf5' : '#eef2ff',
-                            color:      isUAE ? '#059669' : '#4f46e5',
-                          }}>
-                          {client.region}
+              <div className="space-y-2">
+                {recentEngs.map(e => (
+                  <button key={e.id}
+                    onClick={() => navigate(`/engagements/${e.id}/fs`)}
+                    className="w-full flex items-center gap-3 p-3 rounded-xl hover:bg-slate-50 transition-all text-left group">
+                    <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-indigo-100 to-indigo-200 flex items-center justify-center font-bold text-indigo-600 text-sm flex-shrink-0">
+                      {e.method?.slice(0,2)}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-semibold text-slate-800 text-sm truncate">{e.clientName}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${METHOD_COLOR[e.method] || 'bg-slate-100 text-slate-600'}`}>{e.method}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLOR[e.status||'DRAFT'] || 'bg-slate-100 text-slate-600'}`}>
+                          {(e.status||'DRAFT').replace(/_/g,' ')}
                         </span>
                       </div>
+                      <p className="text-xs text-slate-400 mt-0.5">{e.name} · FY {e.financialYear}</p>
+                    </div>
+                    <span className="text-xs text-slate-400">{timeAgo(e.updatedAt)}</span>
+                    <span className="text-slate-200 group-hover:text-indigo-400 transition-colors ml-1">→</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Engagement status breakdown */}
+          {!loading && totalEngs > 0 && (
+            <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+              <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-4">Engagement Pipeline</h2>
+              <div className="grid grid-cols-5 gap-3">
+                {[
+                  { key:'DRAFT',        label:'Draft',        color:'bg-slate-400' },
+                  { key:'IN_PROGRESS',  label:'In Progress',  color:'bg-blue-500' },
+                  { key:'UNDER_REVIEW', label:'Under Review', color:'bg-amber-500' },
+                  { key:'LOCKED',       label:'Locked',       color:'bg-emerald-500' },
+                  { key:'FILED',        label:'Filed',        color:'bg-purple-500' },
+                ].map(s => {
+                  const count = engByStatus[s.key] || 0;
+                  const pct   = totalEngs > 0 ? Math.round((count / totalEngs) * 100) : 0;
+                  return (
+                    <div key={s.key} className="text-center">
+                      <div className="text-2xl font-bold text-slate-800">{count}</div>
+                      <div className="w-full bg-slate-100 rounded-full h-1.5 my-1.5">
+                        <div className={`h-1.5 rounded-full ${s.color} transition-all`} style={{ width: `${pct}%` }} />
+                      </div>
+                      <div className="text-xs text-slate-500">{s.label}</div>
                     </div>
                   );
                 })}
               </div>
+            </div>
+          )}
+
+          {/* Validation alert */}
+          {!loading && valFailures > 0 && (
+            <div className="bg-red-50 border border-red-200 rounded-2xl p-5 flex items-center gap-4">
+              <span className="text-2xl">⚠️</span>
+              <div className="flex-1">
+                <p className="font-semibold text-red-800 text-sm">{valFailures} Validation Failure{valFailures !== 1 ? 's' : ''} in the last 30 days</p>
+                <p className="text-xs text-red-600 mt-0.5">Open the relevant engagement → Run Validation to see details</p>
+              </div>
+              {currentEngagement && (
+                <button onClick={() => navigate(`/engagements/${currentEngagement.id}/validation`)}
+                  className="px-3 py-1.5 bg-red-600 text-white text-xs rounded-lg hover:bg-red-700 font-medium flex-shrink-0">
+                  View →
+                </button>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Right col */}
+        <div className="space-y-5">
+
+          {/* Firm card */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+            <div className="flex items-center gap-3 mb-5 pb-4 border-b border-slate-100">
+              <div className="w-11 h-11 rounded-xl bg-gradient-to-br from-indigo-500 to-purple-600 flex items-center justify-center text-white font-bold text-lg shadow-md">
+                {firm?.name?.charAt(0) || 'F'}
+              </div>
+              <div className="min-w-0">
+                <p className="font-bold text-slate-900 truncate">{firm?.name}</p>
+                <p className="text-xs text-slate-400">{user?.designation || user?.role?.replace(/_/g,' ')}</p>
+              </div>
+            </div>
+            <div className="space-y-2.5">
+              {[
+                { label:'Email',    value: user?.email },
+                { label:'Region',   value: region ? `${flag} ${region}` : 'Not configured' },
+                { label:'Currency', value: currency ? `${currSymbol} ${currency}` : 'Not configured' },
+                { label:'Role',     value: user?.role?.replace(/_/g,' ') },
+                { label:'Plan',     value: firm?.plan || 'Starter' },
+              ].map((r, i) => r.value && (
+                <div key={i} className="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
+                  <span className="text-xs text-slate-400">{r.label}</span>
+                  <span className="text-xs text-slate-700 font-semibold">{r.value}</span>
+                </div>
+              ))}
+            </div>
+            <button onClick={() => navigate('/settings')}
+              className="w-full mt-4 py-2 text-xs font-semibold text-indigo-600 border border-indigo-200 rounded-xl hover:bg-indigo-50 transition-colors">
+              ⚙️ Account Settings
+            </button>
+          </div>
+
+          {/* Activity feed */}
+          <div className="bg-white rounded-2xl shadow-sm border border-slate-100 p-6">
+            <h2 className="text-sm font-bold text-slate-700 uppercase tracking-wider mb-4">Recent Activity</h2>
+            {loading ? (
+              <div className="text-slate-400 text-xs text-center py-4">Loading activity...</div>
+            ) : activity.length === 0 ? (
+              <p className="text-xs text-slate-400 text-center py-4">No activity yet</p>
+            ) : (
+              <div className="space-y-3">
+                {activity.map((a, i) => (
+                  <div key={i} className="flex items-start gap-2.5">
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-br from-indigo-400 to-purple-500 flex items-center justify-center text-white font-bold text-xs flex-shrink-0">
+                      {a.userName?.charAt(0)?.toUpperCase() || '?'}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs text-slate-700 leading-relaxed">
+                        <strong>{a.userName}</strong> {a.action}
+                      </p>
+                      <p className="text-xs text-slate-400 mt-0.5">{timeAgo(a.at)}</p>
+                    </div>
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </div>
-
-        {/* ── Standards overview ────────────────────────────────────── */}
-        <div className="bg-white border border-slate-200 rounded-2xl p-6 shadow-sm">
-          <h3 className="font-bold text-slate-900 mb-1">Supported Standards</h3>
-          <p className="text-xs text-slate-400 mb-5">All four accounting methods available on this platform</p>
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            {[
-              { key:'AS',       name:'Accounting Standards',    desc:'Companies Act 2013 · India', region:'India 🇮🇳', color:'#6366f1' },
-              { key:'IND_AS',   name:'Indian AS (Ind AS)',      desc:'IFRS Converged · India',     region:'India 🇮🇳', color:'#8b5cf6' },
-              { key:'IFRS',     name:'IFRS Full',               desc:'International Standards',    region:'UAE 🇦🇪',   color:'#10b981' },
-              { key:'IFRS_SME', name:'IFRS for SMEs',           desc:'Simplified · UAE',           region:'UAE 🇦🇪',   color:'#f59e0b' },
-            ].map(s => (
-              <div key={s.key}
-                className={`p-4 rounded-xl border-2 transition-all ${
-                  method === s.key ? 'shadow-md' : ''
-                }`}
-                style={{
-                  borderColor: method === s.key ? s.color : '#e2e8f0',
-                  background:  method === s.key ? s.color + '0d' : '#f8fafc',
-                }}>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-xs font-bold px-2 py-0.5 rounded-full text-white"
-                    style={{ background: s.color }}>
-                    {s.key}
-                  </span>
-                  {method === s.key && (
-                    <span className="text-xs font-bold px-2 py-0.5 rounded-full"
-                      style={{ background: s.color + '20', color: s.color }}>
-                      Active
-                    </span>
-                  )}
-                </div>
-                <p className="text-sm font-bold text-slate-800 mt-2">{s.name}</p>
-                <p className="text-xs text-slate-400 mt-0.5">{s.desc}</p>
-                <p className="text-xs text-slate-500 mt-1">{s.region}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 'use strict';
 const router  = require('express').Router();
+const { sendEmail, passwordResetHTML, inviteEmailHTML } = require('../services/email.service');
 const bcrypt  = require('bcryptjs');
 const jwt     = require('jsonwebtoken');
 const { v4: uuid } = require('uuid');
@@ -187,6 +188,248 @@ router.patch('/password', authGuard, async (req, res, next) => {
       newHash, new Date(), req.user.id
     );
     res.json({ message: 'Password changed' });
+  } catch (err) { next(err); }
+});
+
+// ── In-memory stores (replace with Redis for multi-instance production) ──────
+const resetTokens   = new Map(); // token → { userId, email, expiresAt }
+const pendingInvites = new Map(); // token → { firmId, email, role, ... }
+
+// POST /api/auth/forgot-password
+router.post('/forgot-password', async (req, res, next) => {
+  try {
+    const { email } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required' });
+
+    const user = await prisma.user.findFirst({
+      where:   { email: email.toLowerCase().trim(), isActive: true },
+      include: { firm: true },
+    });
+    // Always return success — never reveal whether email exists
+    if (!user) return res.json({ sent: true });
+
+    const { randomBytes } = require('crypto');
+    const token     = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
+    resetTokens.set(token, { userId: user.id, email: user.email, expiresAt });
+    setTimeout(() => resetTokens.delete(token), 30 * 60 * 1000);
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    await sendEmail({
+      to:      user.email,
+      subject: 'Reset your FinStatement password',
+      html:    passwordResetHTML(`${frontendUrl}/reset-password?token=${token}`, user.name, 30),
+    });
+    res.json({ sent: true });
+  } catch (err) { next(err); }
+});
+
+// POST /api/auth/reset-password
+router.post('/reset-password', async (req, res, next) => {
+  try {
+    const { token, password } = req.body;
+    if (!token || !password) return res.status(400).json({ error: 'Token and password required' });
+    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const record = resetTokens.get(token);
+    if (!record || record.expiresAt < new Date())
+      return res.status(400).json({ error: 'Reset link expired or invalid. Request a new one.' });
+
+    const bcrypt = require('bcryptjs');
+    const hash   = await bcrypt.hash(password, 12);
+    await prisma.user.update({ where: { id: record.userId }, data: { passwordHash: hash, updatedAt: new Date() } });
+    await prisma.userSession.deleteMany({ where: { userId: record.userId } });
+    resetTokens.delete(token);
+    res.json({ reset: true });
+  } catch (err) { next(err); }
+});
+
+// POST /api/auth/invite — send invite email
+router.post('/invite', authGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
+  try {
+    const { email, role = 'STAFF' } = req.body;
+    if (!email) return res.status(400).json({ error: 'Email required' });
+    if (!['MANAGER','STAFF','VIEWER'].includes(role))
+      return res.status(400).json({ error: 'Role must be MANAGER, STAFF, or VIEWER' });
+
+    const existing = await prisma.user.findFirst({
+      where: { email: email.toLowerCase().trim(), firmId: req.firmId, isActive: true },
+    });
+    if (existing) return res.status(409).json({ error: 'This email is already a member of your firm' });
+
+    const firm = await prisma.firm.findUnique({ where: { id: req.firmId } });
+
+    const { randomBytes } = require('crypto');
+    const token     = randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
+    pendingInvites.set(token, { firmId: req.firmId, firmSlug: firm.slug, firmName: firm.name, email: email.toLowerCase().trim(), role, inviterName: req.user.name, expiresAt });
+    setTimeout(() => pendingInvites.delete(token), 48 * 60 * 60 * 1000);
+
+    const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
+    await sendEmail({
+      to:      email,
+      subject: `You're invited to join ${firm.name} on FinStatement`,
+      html:    inviteEmailHTML(`${frontendUrl}/accept-invite?token=${token}`, req.user.name, firm.name, role, 48),
+    });
+    res.json({ sent: true, email, role });
+  } catch (err) { next(err); }
+});
+
+// GET /api/auth/invite/:token — validate before showing accept form
+router.get('/invite/:token', async (req, res, next) => {
+  try {
+    const record = pendingInvites.get(req.params.token);
+    if (!record || record.expiresAt < new Date())
+      return res.status(400).json({ error: 'Invite link expired or invalid' });
+    res.json({ valid: true, email: record.email, firmName: record.firmName, role: record.role });
+  } catch (err) { next(err); }
+});
+
+// POST /api/auth/accept-invite — create account and join firm
+router.post('/accept-invite', async (req, res, next) => {
+  try {
+    const { token, name, password } = req.body;
+    if (!token || !name || !password) return res.status(400).json({ error: 'Token, name and password required' });
+    if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
+
+    const record = pendingInvites.get(token);
+    if (!record || record.expiresAt < new Date())
+      return res.status(400).json({ error: 'Invite link expired. Ask for a new invitation.' });
+
+    const existing = await prisma.user.findFirst({ where: { email: record.email, firmId: record.firmId } });
+    if (existing) { pendingInvites.delete(token); return res.status(409).json({ error: 'Account already exists in this firm' }); }
+
+    const bcrypt = require('bcryptjs');
+    const jwt    = require('jsonwebtoken');
+    const { v4: uuid } = require('uuid');
+
+    const user = await prisma.user.create({
+      data: { firmId: record.firmId, email: record.email, passwordHash: await bcrypt.hash(password, 12), name: name.trim(), role: record.role, isActive: true },
+      include: { firm: true },
+    });
+    pendingInvites.delete(token);
+
+    const jwtToken = jwt.sign({ userId: user.id, firmId: user.firmId }, process.env.JWT_SECRET, { expiresIn: '8h' });
+    await prisma.userSession.create({ data: { id: uuid(), userId: user.id, token: jwtToken, expiresAt: new Date(Date.now() + 8*60*60*1000) } });
+
+    res.status(201).json({
+      token: jwtToken,
+      user:  { id: user.id, name: user.name, email: user.email, role: user.role, firmId: user.firmId },
+      firm:  { id: user.firm.id, name: user.firm.name, slug: user.firm.slug, region: user.firm.region, currency: user.firm.currency },
+    });
+  } catch (err) { next(err); }
+});
+
+// ── Firm user management ──────────────────────────────────────────────────────
+
+// GET /api/auth/users — list all users in firm
+router.get('/users', authGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (req, res, next) => {
+  try {
+    const users = await prisma.user.findMany({
+      where:   { firmId: req.firmId },
+      orderBy: [{ role: 'asc' }, { name: 'asc' }],
+      select: {
+        id: true, name: true, email: true, role: true,
+        isActive: true, avatar: true, designation: true,
+        phone: true, lastLoginAt: true, createdAt: true,
+      },
+    });
+    res.json(users);
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/auth/users/:id/role — change a user's role
+router.patch('/users/:id/role', authGuard, requireRole('FIRM_ADMIN'), async (req, res, next) => {
+  try {
+    const { role } = req.body;
+    const validRoles = ['FIRM_ADMIN', 'MANAGER', 'STAFF', 'VIEWER'];
+    if (!validRoles.includes(role)) {
+      return res.status(400).json({ error: `Role must be one of: ${validRoles.join(', ')}` });
+    }
+    // Cannot change own role
+    if (req.params.id === req.user.id) {
+      return res.status(400).json({ error: 'You cannot change your own role' });
+    }
+    // Verify user belongs to same firm
+    const target = await prisma.user.findFirst({
+      where: { id: req.params.id, firmId: req.firmId },
+    });
+    if (!target) return res.status(404).json({ error: 'User not found in your firm' });
+
+    await prisma.user.update({
+      where: { id: req.params.id },
+      data:  { role, updatedAt: new Date() },
+    });
+    res.json({ updated: true, role });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/auth/users/:id/deactivate — deactivate/reactivate a user
+router.patch('/users/:id/deactivate', authGuard, requireRole('FIRM_ADMIN'), async (req, res, next) => {
+  try {
+    if (req.params.id === req.user.id) {
+      return res.status(400).json({ error: 'You cannot deactivate your own account' });
+    }
+    const target = await prisma.user.findFirst({
+      where: { id: req.params.id, firmId: req.firmId },
+    });
+    if (!target) return res.status(404).json({ error: 'User not found in your firm' });
+
+    const isActive = !target.isActive; // toggle
+    await prisma.user.update({
+      where: { id: req.params.id },
+      data:  { isActive, updatedAt: new Date() },
+    });
+
+    // If deactivating, invalidate all sessions
+    if (!isActive) {
+      await prisma.userSession.deleteMany({ where: { userId: req.params.id } });
+    }
+
+    res.json({ updated: true, isActive });
+  } catch (err) { next(err); }
+});
+
+// ── Session management ────────────────────────────────────────────────────────
+
+// GET /api/auth/sessions — list all active sessions for current user
+router.get('/sessions', authGuard, async (req, res, next) => {
+  try {
+    const sessions = await prisma.userSession.findMany({
+      where:   { userId: req.user.id, expiresAt: { gt: new Date() } },
+      orderBy: { createdAt: 'desc' },
+    });
+    // Mark current session
+    const result = sessions.map(s => ({
+      id:        s.id,
+      createdAt: s.createdAt,
+      expiresAt: s.expiresAt,
+      isCurrent: s.token === req.headers.authorization?.replace('Bearer ',''),
+      userAgent: req.headers['user-agent']?.slice(0,150) || null,
+      ipAddress: req.ip,
+    }));
+    res.json(result);
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/auth/sessions/:id — revoke a specific session
+router.delete('/sessions/:id', authGuard, async (req, res, next) => {
+  try {
+    await prisma.userSession.deleteMany({
+      where: { id: req.params.id, userId: req.user.id }, // only own sessions
+    });
+    res.json({ revoked: true });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/auth/sessions — revoke all other sessions
+router.delete('/sessions', authGuard, async (req, res, next) => {
+  try {
+    const currentToken = req.headers.authorization?.replace('Bearer ','');
+    await prisma.userSession.deleteMany({
+      where: { userId: req.user.id, token: { not: currentToken } },
+    });
+    res.json({ revoked: true });
   } catch (err) { next(err); }
 });
 

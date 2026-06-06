@@ -8,23 +8,7 @@ function generateOTP() {
   return Math.floor(100000 + Math.random() * 900000).toString();
 }
 
-// Simulate sending OTP (replace with actual email/SMS service)
-async function sendOTP(type, target, otp, userName) {
-  // In production: use Nodemailer for email, Twilio/MSG91 for SMS
-  // For now: log to console (visible in Render logs)
-  console.log(`\n========== OTP VERIFICATION ==========`);
-  console.log(`Type:   ${type}`);
-  console.log(`Target: ${target}`);
-  console.log(`User:   ${userName}`);
-  console.log(`OTP:    ${otp}`);
-  console.log(`Valid:  10 minutes`);
-  console.log(`======================================\n`);
-
-  // TODO: Replace with actual sending
-  // Email: nodemailer / SendGrid / Resend
-  // SMS: Twilio / MSG91 / Fast2SMS (India) / Unifonic (UAE)
-  return true;
-}
+const { sendEmail, otpEmailHTML } = require('../services/email.service');
 
 // POST /api/otp/send — send OTP for email or phone verification
 router.post('/send', authGuard, async (req, res, next) => {
@@ -59,11 +43,11 @@ router.post('/send', authGuard, async (req, res, next) => {
 
     // Send OTP via email or SMS
     if (type === 'email') {
-      const html = otpEmailHTML(otp, `Please verify your email address.`, req.user.name, 10);
+      const html = otpEmailHTML(otp, 'Please verify your email address to continue.', req.user.name, 10);
       await sendEmail({ to: target, subject: `${otp} is your FinStatement verification code`, html });
     } else {
-      // SMS — log for now, wire Twilio/Fast2SMS here
-      console.log(`[SMS OTP] Send ${otp} to ${target}`);
+      // SMS — wire Twilio/Fast2SMS/Unifonic here
+      console.log(`[SMS OTP] ${otp} → ${target} (SMS provider not configured)`);
     }
 
     res.json({

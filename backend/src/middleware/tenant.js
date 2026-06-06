@@ -64,6 +64,7 @@ async function engagementGuard(req, res, next) {
       return res.status(403).json({ error: 'Engagement is locked.' });
     }
 
+    // Populate req.engagement
     req.engagement = {
       id:            row.id,
       clientId:      row.clientId,
@@ -85,6 +86,20 @@ async function engagementGuard(req, res, next) {
         gstin:        row.gstin,
       },
     };
+
+    // Item 5: Engagement-level access enforcement for STAFF and VIEWER roles.
+    // FIRM_ADMIN and MANAGER can access all engagements in their firm.
+    // STAFF and VIEWER can only access engagements they are explicitly assigned to.
+    if (['STAFF', 'VIEWER'].includes(req.user.role)) {
+      const assigned = await prisma.$queryRawUnsafe(
+        `SELECT id FROM "EngagementUser" WHERE "engagementId"=$1 AND "userId"=$2 LIMIT 1`,
+        engagementId, req.user.id
+      );
+      if (!assigned.length) {
+        return res.status(403).json({ error: 'You are not assigned to this engagement. Ask a manager to add you.' });
+      }
+    }
+
     next();
   } catch (err) { next(err); }
 }
