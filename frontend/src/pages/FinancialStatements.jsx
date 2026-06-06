@@ -516,7 +516,7 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
 // ── CFS — Indirect method with proper working capital from PY/CY BS delta ─────
 // Working capital changes = (PY current asset/liability) - (CY current asset/liability)
 // This is the correct indirect method: uses actual BS movements, not estimates.
-function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, divisor, currSymbol, hasPY, cyDate, pyDate, locale = 'en-IN' }) {
+function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, divisor, currSymbol, hasPY, cyYear, pyYear, cyDate, pyDate, locale = 'en-IN' }) {
   const D       = divisor;
   const isIFRS  = method==='IFRS'||method==='IFRS_SME';
 
@@ -1006,7 +1006,7 @@ export default function FinancialStatements() {
         <>
           {tab==='BS'   && <BSStatement   lines={allLines.filter(l=>l.sheet==='BS')} method={method} hidden={hidden} onHide={toggleHide} divisor={unit.value} currSymbol={currSymbol} hasPY={hasPY} cyYear={cyYear} pyYear={pyYear} cyDate={cyDate} pyDate={pyDate} locale={locale} />}
           {tab==='PL'   && <PLStatement   lines={allLines} method={method} divisor={unit.value} currSymbol={currSymbol} hasPY={hasPY} cyYear={cyYear} pyYear={pyYear} cyDate={cyDate} pyDate={pyDate} locale={locale} />}
-          {tab==='CFS'  && <CFSStatement  bsLines={allLines.filter(l=>l.sheet==='BS')} plLines={allLines} method={method} cfsMethod={cfsMethod} onMethodChange={setCfsMethod} divisor={unit.value} currSymbol={currSymbol} hasPY={hasPY} cyDate={cyDate} pyDate={pyDate} locale={locale} />}
+          {tab==='CFS'  && <CFSStatement  bsLines={allLines.filter(l=>l.sheet==='BS')} plLines={allLines} method={method} cfsMethod={cfsMethod} onMethodChange={setCfsMethod} divisor={unit.value} currSymbol={currSymbol} hasPY={hasPY} cyYear={cyYear} pyYear={pyYear} cyDate={cyDate} pyDate={pyDate} locale={locale} />}
           {tab==='OCI'  && <OCIStatement  lines={allLines} divisor={unit.value} currSymbol={currSymbol} hasPY={hasPY} locale={locale} />}
           {tab==='SOCE' && <SOCEStatement bsLines={allLines.filter(l=>l.sheet==='BS')} plLines={allLines} divisor={unit.value} currSymbol={currSymbol} hasPY={hasPY} locale={locale} />}
         </>
