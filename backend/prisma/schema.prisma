@@ -123,6 +123,7 @@ model Client {
   isActive    Boolean      @default(true)
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
+  deletedAt   DateTime?
   engagements Engagement[]
 
   @@index([firmId])
@@ -136,10 +137,13 @@ model Engagement {
   method        Method
   financialYear String
   currency      String   @default("INR")
-  isActive      Boolean  @default(true)
-  isLocked      Boolean  @default(false)
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  isActive        Boolean  @default(true)
+  isLocked        Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+  deletedAt       DateTime?
+  status          String   @default("DRAFT")
+  statusUpdatedAt DateTime?
 
   users          EngagementUser[]
   tbVersions     TBVersion[]
@@ -231,26 +235,22 @@ model TBVersionDiff {
 }
 
 model MasterGrouping {
-  id                  String              @id @default(uuid())
+  id                  String             @id @default(uuid())
   sheet               String
   groupName           String
   assetLiability      AssetLiability
-  subGroupNo          String              @unique
+  subGroupNo          String             @unique
   subGroupName        String
   noteGroupId         String?
   displayOrder        Int
   methodApplicability MethodApplicability @default(ALL)
-  isActive            Boolean             @default(true)
-  createdAt           DateTime            @default(now())
-  currentNonCurrent   String?
-  plCategory          String?
-  isCashItem          Boolean             @default(false)
+  isActive            Boolean            @default(true)
+  createdAt           DateTime           @default(now())
 
   @@index([groupName])
   @@index([noteGroupId])
   @@index([methodApplicability])
   @@index([sheet])
-  @@index([plCategory])
 }
 
 model Mapping {
@@ -268,6 +268,7 @@ model Mapping {
   isSaved          Boolean    @default(true)
   createdAt        DateTime   @default(now())
   updatedAt        DateTime   @updatedAt
+  deletedAt        DateTime?
 
   @@unique([engagementId, subGrouping])
   @@index([engagementId])
@@ -307,26 +308,21 @@ model NoteDetail {
 }
 
 model FSLine {
-  id                String         @id @default(uuid())
-  engagementId      String
-  engagement        Engagement     @relation(fields: [engagementId], references: [id])
-  tbVersionId       String?
-  tbVersion         TBVersion?     @relation(fields: [tbVersionId], references: [id])
-  sheet             String
-  groupName         String
-  totalFinalNet     Decimal        @default(0) @db.Decimal(18,2)
-  noteGroupId       String?
-  displayOrder      Int            @default(0)
-  assetLiability    AssetLiability @default(Assets)
-  generatedAt       DateTime       @default(now())
-  isPriorYear       Boolean        @default(false)
-  currentNonCurrent String?
-  plCategory        String?
-  isCashItem        Boolean        @default(false)
+  id             String     @id @default(uuid())
+  engagementId   String
+  engagement     Engagement @relation(fields: [engagementId], references: [id])
+  tbVersionId    String?
+  tbVersion      TBVersion? @relation(fields: [tbVersionId], references: [id])
+  sheet          String
+  groupName      String
+  totalFinalNet  Decimal    @default(0) @db.Decimal(18,2)
+  noteGroupId    String?
+  displayOrder   Int        @default(0)
+  assetLiability AssetLiability @default(Assets)
+  generatedAt    DateTime   @default(now())
 
   @@index([engagementId])
   @@index([sheet])
-  @@index([engagementId, isPriorYear])
 }
 
 model ReportSection {
