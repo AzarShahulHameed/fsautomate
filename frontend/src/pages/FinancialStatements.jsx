@@ -3,7 +3,7 @@ import { useParams, useSearchParams } from 'react-router-dom';
 import { fsAPI } from '../api/client';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
-
+ 
 const UNITS = [
   { label: 'Actual',    value: 1        },
   { label: 'Hundreds',  value: 100      },
@@ -12,14 +12,14 @@ const UNITS = [
   { label: 'Millions',  value: 1000000  },
   { label: 'Crores',    value: 10000000 },
 ];
-
+ 
 const METHOD_CONFIG = {
   AS:       { bsTitle: 'Balance Sheet',                     plTitle: 'Statement of Profit and Loss',      tabs: ['BS','PL','CFS'],             standard: 'Companies Act 2013 — Schedule III',   hasOCI: false },
   IND_AS:   { bsTitle: 'Balance Sheet',                     plTitle: 'Statement of Profit and Loss',      tabs: ['BS','PL','OCI','CFS','SOCE'], standard: 'Ind AS — Schedule III Division II',   hasOCI: true  },
   IFRS:     { bsTitle: 'Statement of Financial Position',   plTitle: 'Statement of Comprehensive Income', tabs: ['BS','PL','OCI','CFS','SOCE'], standard: 'IFRS — IAS 1',                       hasOCI: true  },
   IFRS_SME: { bsTitle: 'Statement of Financial Position',   plTitle: 'Statement of Comprehensive Income', tabs: ['BS','PL','CFS','SOCE'],       standard: 'IFRS for SMEs — Section 3',          hasOCI: false },
 };
-
+ 
 // locale: 'en-IN' for India (1,00,000 format), 'en-US' for UAE (1,000,000 format)
 function fmt(n, divisor = 1, locale = 'en-IN') {
   const num = Number(n || 0) / divisor;
@@ -27,11 +27,11 @@ function fmt(n, divisor = 1, locale = 'en-IN') {
   const s   = Math.round(abs).toLocaleString(locale);
   return num < 0 ? `(${s})` : s;
 }
-
+ 
 // ── Table Row — now with PY column ───────────────────────────────────────────
 function Row({ label, note, amount, pyAmount, hasPY, bold, indent, section, subheader, borderTop, divisor, locale, onHide, hideable }) {
   const [hovered, setHovered] = useState(false);
-
+ 
   if (section) return (
     <tr className="bg-slate-100">
       <td colSpan={hasPY ? 5 : 4} className="px-3 py-2 font-bold text-slate-700 uppercase text-xs tracking-wide">{label}</td>
@@ -42,7 +42,7 @@ function Row({ label, note, amount, pyAmount, hasPY, bold, indent, section, subh
       <td colSpan={hasPY ? 5 : 4} className="px-3 py-1.5 font-semibold text-slate-600 text-xs">{label}</td>
     </tr>
   );
-
+ 
   return (
     <tr className={`${borderTop ? 'border-t-2 border-slate-600' : ''} ${bold ? 'bg-slate-50' : 'border-b border-slate-100 hover:bg-blue-50'} transition-colors`}
       onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
@@ -64,7 +64,7 @@ function Row({ label, note, amount, pyAmount, hasPY, bold, indent, section, subh
     </tr>
   );
 }
-
+ 
 // Header row for tables — shows CY and PY year labels
 function TableHeader({ hasPY, cyYear, pyYear, cyDate, pyDate, currSymbol, extraCols = 1 }) {
   return (
@@ -87,34 +87,34 @@ function TableHeader({ hasPY, cyYear, pyYear, cyDate, pyDate, currSymbol, extraC
     </tr>
   );
 }
-
+ 
 // ── Balance Sheet ─────────────────────────────────────────────────────────────
 function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY, cyYear, pyYear, cyDate, pyDate, locale = 'en-IN' }) {
   const cfg    = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
   const D      = divisor;
   const isIFRS = method === 'IFRS' || method === 'IFRS_SME';
-
+ 
   const vis    = lines.filter(l => !hidden[l.groupName]);
   const eq     = vis.filter(l => l.assetLiability === 'Equity');
   const liab   = vis.filter(l => l.assetLiability === 'Liabilities');
   const assets = vis.filter(l => l.assetLiability === 'Assets');
-
+ 
   // BS sub-section classification — reads currentNonCurrent from FSLine (set by MasterGrouping)
   // Zero keyword matching. If currentNonCurrent is null (custom item), defaults to noncurrent.
   const isNC = l => l.currentNonCurrent === 'noncurrent' || l.currentNonCurrent === null;
   const isCA = l => l.currentNonCurrent === 'current';
-
+ 
   const ncAssets    = assets.filter(l => isNC(l));
   const cAssets     = assets.filter(l => isCA(l));
   const otherAssets = []; // all assets now classified explicitly
-
+ 
   const ncLiab    = liab.filter(l => l.currentNonCurrent === 'noncurrent' || l.currentNonCurrent === null);
   const cLiab     = liab.filter(l => l.currentNonCurrent === 'current');
   const otherLiab = [];
-
+ 
   const sumCY = arr => arr.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const sumPY = arr => arr.reduce((s,l)=>s+Number(l.pyAmount||0),0);
-
+ 
   const totalNCA    = [...ncAssets,...otherAssets].reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const totalCA     = cAssets.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const totalAssets = totalNCA + totalCA;
@@ -123,7 +123,7 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
   const totalCL     = [...cLiab,...otherLiab].reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const totalLiab   = totalNCL + totalCL;
   const totalEqLiab = totalEq + totalLiab;
-
+ 
   const pyTotalNCA    = hasPY ? [...ncAssets,...otherAssets].reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const pyTotalCA     = hasPY ? cAssets.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const pyTotalAssets = hasPY ? (pyTotalNCA + pyTotalCA) : null;
@@ -132,22 +132,22 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
   const pyTotalCL     = hasPY ? [...cLiab,...otherLiab].reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const pyTotalLiab   = hasPY ? (pyTotalNCL + pyTotalCL) : null;
   const pyTotalEqLiab = hasPY ? (pyTotalEq + pyTotalLiab) : null;
-
+ 
   const diff = totalAssets - totalEqLiab;
-
+ 
   const R = ({ label, note, amount, pyAmt, bold, indent, section, subheader, borderTop, hideable, hideKey }) => (
     <Row label={label} note={note} amount={amount} pyAmount={pyAmt} hasPY={hasPY}
       bold={bold} indent={indent} section={section} subheader={subheader}
       borderTop={borderTop} divisor={D} locale={locale} hideable={hideable}
       onHide={hideKey ? () => onHide(hideKey) : undefined} />
   );
-
+ 
   const Lines = ({ arr }) => arr.map((l,i) => (
     <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber}
       amount={Number(l.totalFinalNet)} pyAmt={hasPY ? Number(l.pyAmount??0) : null}
       indent={2} hideable hideKey={l.groupName} />
   ));
-
+ 
   const renderIFRS = () => (<>
     <R label="ASSETS" section />
     <R label="Non-Current Assets" subheader />
@@ -171,7 +171,7 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
     <R label="Total Current Liabilities" amount={totalCL} pyAmt={pyTotalCL} bold borderTop />
     <R label="TOTAL EQUITY AND LIABILITIES" amount={totalEqLiab} pyAmt={pyTotalEqLiab} bold borderTop />
   </>);
-
+ 
   const renderIndian = () => (<>
     <R label="I. EQUITY AND LIABILITIES" section />
     <R label="(1) Shareholders' Funds / Equity" subheader />
@@ -195,7 +195,7 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
     <R label="Total Current Assets" amount={totalCA} pyAmt={pyTotalCA} bold borderTop />
     <R label="TOTAL — ASSETS" amount={totalAssets} pyAmt={pyTotalAssets} bold borderTop />
   </>);
-
+ 
   return (
     <div>
       <div className="text-center mb-5">
@@ -216,7 +216,7 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
     </div>
   );
 }
-
+ 
 // ── Profit & Loss ─────────────────────────────────────────────────────────────
 // Renders in the correct format for each method:
 //   AS / Ind AS : Schedule III — Revenue → Other Income → Total Income →
@@ -230,19 +230,19 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
   const isIFRS  = method === 'IFRS' || method === 'IFRS_SME';
   const isAS    = method === 'AS';
   const isIndAS = method === 'IND_AS';
-
+ 
   const plLines  = lines.filter(l => l.sheet === 'PL');
   const ociLines = lines.filter(l => l.sheet === 'OCI');
-
+ 
   const isIncome  = l => l.assetLiability === 'Income';
   const isExpense = l => l.assetLiability === 'Expenses';
-
+ 
   // ── Revenue classification ────────────────────────────────────────────────
   // P&L classification — reads plCategory from FSLine (set by MasterGrouping)
   // Zero keyword matching anywhere.
   const revenueLines     = plLines.filter(l => l.plCategory === 'revenue');
   const otherIncomeLines = plLines.filter(l => l.plCategory === 'otherIncome');
-
+ 
   // ── Expense classification — reads plCategory (zero keyword matching) ─────
   const cosLines      = plLines.filter(l => l.plCategory === 'cos');
   const finCostLines  = plLines.filter(l => l.plCategory === 'financeCost');
@@ -252,11 +252,11 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
   const otherExpLines = plLines.filter(l => l.plCategory === 'admin');
   const exceptLines   = plLines.filter(l => isExpense(l) &&
     !['cos','financeCost','depreciation','tax','selling','admin'].includes(l.plCategory||''));
-
+ 
   // ── Compute totals ────────────────────────────────────────────────────────
   const sum   = arr => arr.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const sumPY = arr => hasPY ? arr.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
-
+ 
   const totalRevenue      = sum(revenueLines);
   const totalOtherIncome  = sum(otherIncomeLines);
   const totalCOS          = sum(cosLines);
@@ -267,12 +267,12 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
   const totalFinCost      = sum(finCostLines);
   const totalExcept       = sum(exceptLines);
   const totalTax          = sum(taxLines);
-
+ 
   // AS/Ind AS: Total Expenses = all expense lines except tax
   const totalExpenses = totalCOS + totalSelling + totalOtherExp + totalDepr + totalFinCost + totalExcept;
   // Total income for AS
   const totalIncome   = totalRevenue + totalOtherIncome;
-
+ 
   // PBT computation differs by method
   // AS/Ind AS: Total Income - Total Expenses (before tax)
   // IFRS: Gross Profit + OtherIncome - Selling - OtherExp - Depr - FinCost
@@ -285,7 +285,7 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
   const pat      = pbtClean - totalTax;
   const ociTotal = sum(ociLines);
   const totalCI  = pat + ociTotal;
-
+ 
   // PY
   const pyRevenue      = sumPY(revenueLines);
   const pyOtherIncome  = sumPY(otherIncomeLines);
@@ -303,19 +303,19 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
   const pyPAT          = hasPY ? (pyPBT - pyTax) : null;
   const pyOCI          = sumPY(ociLines);
   const pyCI           = hasPY ? (pyPAT + pyOCI) : null;
-
+ 
   // ── Dynamic profit/loss label helper ─────────────────────────────────────
   function plLabel(amount, pyAmt, positiveWord, negativeWord) {
     // Use current year amount to decide wording; if zero use positive word
     const word = amount < 0 ? negativeWord : positiveWord;
     return word;
   }
-
+ 
   const grossLabel  = plLabel(grossProfit,   pyGross,  'GROSS PROFIT',    'GROSS LOSS');
   const patLabel    = plLabel(pat,            pyPAT,    'PROFIT FOR THE YEAR', 'LOSS FOR THE YEAR');
   const pbtLabel    = plLabel(pbtClean,       pyPBT,    'PROFIT BEFORE TAX',   'LOSS BEFORE TAX');
   const ciLabel     = plLabel(totalCI,        pyCI,     'TOTAL COMPREHENSIVE INCOME FOR THE YEAR', 'TOTAL COMPREHENSIVE LOSS FOR THE YEAR');
-
+ 
   const Blank = () => <tr><td colSpan={hasPY ? 5 : 4} className="py-1.5 border-0"></td></tr>;
   const R = ({label, note, amount, pyAmt, bold, indent, section, subheader, borderTop}) => (
     <Row label={label} note={note} amount={amount} pyAmount={pyAmt} hasPY={hasPY}
@@ -325,7 +325,7 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
     <R key={i} label={l.groupName} note={l.noteGroup?.noteNumber}
       amount={Number(l.totalFinalNet)} pyAmt={hasPY?Number(l.pyAmount??0):null} indent={2} />
   ));
-
+ 
   // ── AS / Ind AS format — Schedule III ─────────────────────────────────────
   // I. Revenue from Operations
   // II. Other Income
@@ -397,7 +397,7 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
       <R label="Diluted EPS (₹)" amount={null} indent={2} />
     </>
   );
-
+ 
   // ── IFRS / IFRS SME format — function-based ────────────────────────────────
   // Revenue → Cost of Sales → Gross Profit → Distribution Costs →
   // Admin Expenses → Other Income → Operating Profit →
@@ -480,7 +480,7 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
       </>}
     </>
   );
-
+ 
   return (
     <div>
       <div className="text-center mb-5">
@@ -512,46 +512,46 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
     </div>
   );
 }
-
+ 
 // ── CFS — Indirect method with proper working capital from PY/CY BS delta ─────
 // Working capital changes = (PY current asset/liability) - (CY current asset/liability)
 // This is the correct indirect method: uses actual BS movements, not estimates.
 function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, divisor, currSymbol, hasPY, cyYear, pyYear, cyDate, pyDate, locale = 'en-IN' }) {
   const D       = divisor;
   const isIFRS  = method==='IFRS'||method==='IFRS_SME';
-
+ 
   // ── P&L line classification ─────────────────────────────────────────────────
   const incomeLines  = plLines.filter(l=>l.assetLiability==='Income'&&l.sheet==='PL');
   const expenseLines = plLines.filter(l=>l.assetLiability==='Expenses'&&l.sheet==='PL');
   const totalIncome  = incomeLines.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const totalExpense = expenseLines.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const pbt          = totalIncome - totalExpense;
-
+ 
   // PY equivalents (for second column)
   const pyTotalIncome  = hasPY ? incomeLines.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const pyTotalExpense = hasPY ? expenseLines.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const pyPbt          = hasPY ? (pyTotalIncome - pyTotalExpense) : null;
-
+ 
   const depr     = expenseLines.filter(l=>l.plCategory==='depreciation').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const finCost  = expenseLines.filter(l=>l.plCategory==='financeCost').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const pyDepr   = hasPY ? expenseLines.filter(l=>l.plCategory==='depreciation').reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const pyFinCost= hasPY ? expenseLines.filter(l=>l.plCategory==='financeCost').reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
   const cash     = bsLines.filter(l=>l.isCashItem===true&&l.assetLiability==='Assets').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
-
+ 
   // ── Working capital changes (indirect method) ─────────────────────────────
   // Formula: (PY balance - CY balance) for current assets, (CY balance - PY balance) for current liabilities
   // Increase in CA = use of cash (negative); Decrease in CA = source of cash (positive)
   // Increase in CL = source of cash (positive); Decrease in CL = use of cash (negative)
   // Working capital: uses currentNonCurrent field — no keyword matching
-
+ 
   let workingCapitalChanges  = 0;
   const wcItems = [];
-
+ 
   if (hasPY) {
     for (const cyLine of bsLines) {
       const cyAmt = Number(cyLine.totalFinalNet||0);
       const pyAmt = Number(cyLine.pyAmount||0);
-
+ 
       if (cyLine.currentNonCurrent === 'current' && cyLine.assetLiability==='Assets' && !cyLine.isCashItem) {
         const change = pyAmt - cyAmt; // decrease in CA = positive cash flow
         workingCapitalChanges += change;
@@ -563,9 +563,9 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
       }
     }
   }
-
+ 
   const operatingCashBeforeTax = pbt + depr + finCost + workingCapitalChanges;
-
+ 
   // PY: opening cash = cash balance two years ago (not available without PPY TB)
   // So PY CFS column shows structure but can't show full tally without PPY data
   const openingCash = hasPY
@@ -573,15 +573,15 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
     : 0;
   // PY WC is approximated from PY P&L (can't compute BS movements without PPY)
   const pyOperating = hasPY ? (pyPbt + pyDepr + pyFinCost) : null;
-
+ 
   // ── Investing: PPE movements from BS (CY - PY = net capex) ────────────────
   // CFS investing: uses currentNonCurrent field — all noncurrent assets are capex candidates
-
+ 
   let netCapex    = 0;
   let netInvest   = 0;
   const capexItems = [];
   const investItems = [];
-
+ 
   if (hasPY) {
     for (const cyLine of bsLines) {
       const cyAmt = Number(cyLine.totalFinalNet||0);
@@ -600,12 +600,12 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
     }
   }
   const netInvesting = hasPY ? (netCapex + netInvest) : 0;
-
+ 
   // ── Financing: Borrowing movements + finance costs paid ───────────────────
   // CFS financing: uses currentNonCurrent — noncurrent liabilities are borrowings
   let netBorrowing = 0;
   const borrowItems = [];
-
+ 
   if (hasPY) {
     for (const cyLine of bsLines) {
       if (cyLine.assetLiability === 'Liabilities' && cyLine.currentNonCurrent === 'noncurrent') {
@@ -620,7 +620,7 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
   const netChange    = netOperating + netInvesting + netFinancing;
   // PY column: operating only (no BS movement data for PY investing/financing)
   const pyNetChange  = hasPY ? pyOperating : null;
-
+ 
   const cols = hasPY ? 3 : 2;
   const CRow = ({label, amount, pyAmt, bold, indent, sub}) => (
     <tr className={`${bold?'border-t-2 border-slate-500 bg-slate-50':'border-b border-slate-100 hover:bg-blue-50'}`}>
@@ -630,7 +630,7 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
     </tr>
   );
   const SH = ({label}) => <tr className="bg-slate-100"><td colSpan={cols} className="px-3 py-2 font-bold text-slate-700 text-xs uppercase">{label}</td></tr>;
-
+ 
   return (
     <div>
       <div className="text-center mb-4">
@@ -729,7 +729,7 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
     </div>
   );
 }
-
+ 
 // ── OCI ───────────────────────────────────────────────────────────────────────
 function OCIStatement({ lines, divisor, currSymbol, hasPY, locale = 'en-IN' }) {
   const D      = divisor;
@@ -771,7 +771,7 @@ function OCIStatement({ lines, divisor, currSymbol, hasPY, locale = 'en-IN' }) {
     </div>
   );
 }
-
+ 
 // ── SOCE ─────────────────────────────────────────────────────────────────────
 function SOCEStatement({ bsLines, plLines, divisor, currSymbol, hasPY, locale = 'en-IN' }) {
   const D      = divisor;
@@ -779,10 +779,10 @@ function SOCEStatement({ bsLines, plLines, divisor, currSymbol, hasPY, locale = 
   const pat    = plLines.filter(l=>l.assetLiability==='Income').reduce((s,l)=>s+Number(l.totalFinalNet||0),0)
                - plLines.filter(l=>l.assetLiability==='Expenses'&&l.sheet==='PL').reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
   const total  = equity.reduce((s,l)=>s+Number(l.totalFinalNet||0),0);
-
+ 
   // PY closing = CY opening
   const pyEquity  = hasPY ? equity.reduce((s,l)=>s+Number(l.pyAmount||0),0) : null;
-
+ 
   return (
     <div>
       <div className="text-center mb-5">
@@ -826,7 +826,7 @@ function SOCEStatement({ bsLines, plLines, divisor, currSymbol, hasPY, locale = 
     </div>
   );
 }
-
+ 
 // ── Main ──────────────────────────────────────────────────────────────────────
 export default function FinancialStatements() {
   const { engagementId }          = useParams();
@@ -838,7 +838,7 @@ export default function FinancialStatements() {
   const [loading, setLoading]       = useState(true);
   const [generating, setGenerating] = useState(false);
   const [tab, setTab]               = useState('BS');
-
+ 
   // Print mode: inject CSS to hide navigation and format for A4
   React.useEffect(() => {
     if (!isPrintMode) return;
@@ -864,12 +864,12 @@ export default function FinancialStatements() {
   const [unit, setUnit]             = useState(UNITS[0]);
   const [cfsMethod, setCfsMethod]   = useState('indirect');
   const [fsErrors, setFsErrors]     = useState([]);
-
+ 
   const method     = currentEngagement?.method || 'AS';
   const currency   = (method==='IFRS'||method==='IFRS_SME') ? 'AED' : 'INR';
   const currSymbol = currency;
   const cfg        = METHOD_CONFIG[method] || METHOD_CONFIG.AS;
-
+ 
   // Region: UAE if IFRS method or client is UAE
   const region  = (method==='IFRS'||method==='IFRS_SME') ? 'UAE'
     : (currentClient?.region==='UAE'||currentClient?.country==='UAE') ? 'UAE'
@@ -877,7 +877,7 @@ export default function FinancialStatements() {
   const isUAE   = region === 'UAE';
   // Number format: Indian comma style for India, standard for UAE
   const locale  = isUAE ? 'en-US' : 'en-IN';
-
+ 
   // ── Derive FY year labels and date headers from engagement financialYear ──
   // India FY format: "2024-25"  → BS date "as at 31 March 2025"
   //                               PL date "for the year ended 31 March 2025"
@@ -886,10 +886,10 @@ export default function FinancialStatements() {
   //                               PL date "for the year ended 31 December 2024"
   //                               PY BS   "as at 31 December 2023"
   const fy = currentEngagement?.financialYear || '';
-
+ 
   function deriveDates(fyStr) {
     if (!fyStr) return { cyDate: '', pyDate: '', cyYear: 'Current Year', pyYear: 'Previous Year' };
-
+ 
     // India format: "2024-25" — year ending is the second part → 2025 → 31 March 2025
     const m1 = fyStr.match(/^(\d{4})-(\d{2,4})$/);
     if (m1) {
@@ -902,7 +902,7 @@ export default function FinancialStatements() {
         pyYear:  `${startYear}-${String(startYear+1).slice(-2)}`,
       };
     }
-
+ 
     // UAE format: "2024" — calendar year → 31 December 2024
     const m2 = fyStr.match(/^(\d{4})$/);
     if (m2) {
@@ -914,24 +914,53 @@ export default function FinancialStatements() {
         pyYear:  String(yr - 1),
       };
     }
-
+ 
     return { cyDate: fyStr, pyDate: '', cyYear: fyStr, pyYear: 'Previous Year' };
   }
-
+ 
   const { cyDate, pyDate, cyYear, pyYear } = deriveDates(fy);
-
+ 
   useEffect(() => { load(); }, [engagementId]);
-
+ 
   async function load() {
     setLoading(true);
     try {
       const res = await fsAPI.get(engagementId);
-      setData(res.sheets || res);
-      setHasPY(res.hasPY || false);
-    } catch { setData(null); setHasPY(false); }
+      const sheets = res.sheets || res;
+      const hasLines = sheets && Object.keys(sheets).length > 0;
+ 
+      if (!hasLines) {
+        // Sheets are empty — poll for a few seconds in case background generation
+        // from Mapping page is still running, then show Generate button if still empty
+        setLoading(false);
+        // Poll up to 5 times with 1.5s delay before giving up
+        let attempts = 0;
+        const poll = async () => {
+          attempts++;
+          await new Promise(r => setTimeout(r, 1500));
+          try {
+            const pollRes = await fsAPI.get(engagementId);
+            const pollSheets = pollRes.sheets || pollRes;
+            if (pollSheets && Object.keys(pollSheets).length > 0) {
+              setData(pollSheets);
+              setHasPY(pollRes.hasPY || false);
+              return; // done
+            }
+          } catch {}
+          if (attempts < 5) { await poll(); }
+          // After 5 attempts still empty — show Generate button, user clicks manually
+        };
+        setGenerating(true);
+        await poll();
+        setGenerating(false);
+      } else {
+        setData(sheets);
+        setHasPY(res.hasPY || false);
+      }
+    } catch { setData(null); setHasPY(false); setLoading(false); }
     finally { setLoading(false); }
   }
-
+ 
   async function generate() {
     setGenerating(true);
     try {
@@ -952,19 +981,19 @@ export default function FinancialStatements() {
     } catch (err) { toast.error(err?.error || 'Generation failed'); }
     finally { setGenerating(false); }
   }
-
+ 
   const allLines   = Object.values(data || {}).flat();
   const getLines   = sheet => (data?.[sheet] || []).filter(l => !hidden[l.groupName]);
   const toggleHide = key   => setHidden(h => ({ ...h, [key]: !h[key] }));
   const hiddenCount = Object.values(hidden).filter(Boolean).length;
-
+ 
   const tabs = cfg.tabs.map(key => ({
     key,
     label: { BS:'Balance Sheet', PL:'P & L', CFS:'Cash Flow', OCI:'OCI', SOCE:'SOCE' }[key] || key,
   }));
-
+ 
   if (loading) return <div className="p-8 text-slate-400">Loading...</div>;
-
+ 
   return (
     <div className="p-6 max-w-6xl">
       {/* Header */}
@@ -996,7 +1025,7 @@ export default function FinancialStatements() {
           </button>
         </div>
       </div>
-
+ 
       {/* Validation errors */}
       {fsErrors.length > 0 && (
         <div className="mb-4 p-4 bg-red-50 border border-red-200 rounded-xl">
@@ -1004,7 +1033,7 @@ export default function FinancialStatements() {
           {fsErrors.map((e,i) => <p key={i} className="text-xs text-red-600">{e.message}</p>)}
         </div>
       )}
-
+ 
       {/* Tabs */}
       <div className="flex gap-0 mb-6 border-b border-slate-200 overflow-x-auto">
         {tabs.map(t => (
@@ -1014,15 +1043,25 @@ export default function FinancialStatements() {
           </button>
         ))}
       </div>
-
+ 
       {!data || Object.keys(data).length === 0 ? (
         <div className="text-center py-20 bg-white border border-slate-200 rounded-xl text-slate-400">
-          <div className="text-5xl mb-4">📋</div>
-          <p className="font-medium text-slate-600">No financial statements yet.</p>
-          <p className="text-sm mt-1">Complete TB upload → Mapping → click Generate.</p>
-          <button onClick={generate} disabled={generating} className="mt-5 px-5 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
-            {generating ? 'Generating...' : '⚡ Generate Now'}
-          </button>
+          {generating ? (
+            <>
+              <div className="text-5xl mb-4 animate-spin">⚡</div>
+              <p className="font-medium text-slate-600">Generating financial statements…</p>
+              <p className="text-sm mt-1 text-slate-400">This takes a few seconds</p>
+            </>
+          ) : (
+            <>
+              <div className="text-5xl mb-4">📋</div>
+              <p className="font-medium text-slate-600">No financial statements yet.</p>
+              <p className="text-sm mt-1">Complete TB upload → Mapping → click Generate.</p>
+              <button onClick={generate} disabled={generating} className="mt-5 px-5 py-2 bg-indigo-600 text-white text-sm rounded-lg hover:bg-indigo-700">
+                ⚡ Generate Now
+              </button>
+            </>
+          )}
         </div>
       ) : (
         <>
@@ -1036,3 +1075,4 @@ export default function FinancialStatements() {
     </div>
   );
 }
+ 
