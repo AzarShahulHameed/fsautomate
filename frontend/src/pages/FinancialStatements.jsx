@@ -254,7 +254,7 @@ function BSStatement({ lines, method, hidden, onHide, divisor, currSymbol, hasPY
       <div className="text-center mb-5">
         <h2 className="text-lg font-bold uppercase tracking-wide">{cfg.bsTitle}</h2>
         <p className="text-sm text-slate-500">as at {cyDate}</p>
-        <p className="text-xs text-slate-400 mt-0.5">{currSymbol === 'INR' ? 'All amounts in ₹' : `All amounts in ${currSymbol}`}</p>
+        <p className="text-xs text-slate-400 mt-0.5">{currSymbol === 'INR' ? 'All amounts in ₹' : `All amounts in ${currSymbol}`}{divisor > 1 ? ` · Amounts in ${currSymbol} ${divisor===100?'Hundreds':divisor===1000?'Thousands':divisor===100000?'Lakhs':divisor===1000000?'Millions':divisor===10000000?'Crores':''}` : ''}</p>
         <p className="text-xs text-slate-400">{cfg.standard}</p>
       </div>
       <table className="w-full text-sm border border-slate-300 rounded-lg overflow-hidden">
@@ -564,7 +564,7 @@ function PLStatement({ lines, method, divisor, currSymbol, hasPY, cyYear, pyYear
       <div className="text-center mb-5">
         <h2 className="text-lg font-bold uppercase tracking-wide">{cfg.plTitle}</h2>
         <p className="text-sm text-slate-500">for the year ended {cyDate}</p>
-        <p className="text-xs text-slate-400 mt-0.5">{currSymbol==='INR'?'All amounts in ₹':`All amounts in ${currSymbol}`}</p>
+        <p className="text-xs text-slate-400 mt-0.5">{currSymbol==='INR'?'All amounts in ₹':`All amounts in ${currSymbol}`}{divisor > 1 ? ` · Amounts in ${currSymbol} ${divisor===100?'Hundreds':divisor===1000?'Thousands':divisor===100000?'Lakhs':divisor===1000000?'Millions':divisor===10000000?'Crores':''}` : ''}</p>
         <p className="text-xs text-slate-400">{cfg.standard}</p>
       </div>
       <table className="w-full text-sm border border-slate-300 rounded-lg overflow-hidden">
@@ -660,7 +660,7 @@ function CFSStatement({ bsLines, plLines, method, cfsMethod, onMethodChange, div
       <div className="text-center mb-4">
         <h2 className="text-lg font-bold uppercase">{isIFRS?'Statement of Cash Flows':'Cash Flow Statement'}</h2>
         <p className="text-sm text-slate-500">for the year ended {cyDate}</p>
-        <p className="text-xs text-slate-400">{isIFRS?'IAS 7':method==='IND_AS'?'Ind AS 7':'AS 3'}</p>
+        <p className="text-xs text-slate-400">{(method==='IFRS'||method==='IFRS_SME')?'IAS 7':method==='IND_AS'?'Ind AS 7':'AS 3'}</p>
         {hasPY && <p className="text-xs text-emerald-600 mt-1">✓ Working capital changes computed from BS movements</p>}
       </div>
       <div className="flex gap-3 mb-4 justify-center items-center">
