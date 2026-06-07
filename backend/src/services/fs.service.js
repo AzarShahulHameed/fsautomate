@@ -567,14 +567,25 @@ async function generateFS(engagementId, firmId) {
 // GET FS — returns CY lines enriched with PY amounts as pyAmount field
 // ════════════════════════════════════════════════════════════════════════════
 async function getFS(engagementId) {
-  const [allLines, noteGroups] = await Promise.all([
+  const [allLines, noteGroups, pyTBVersion] = await Promise.all([
     prisma.fSLine.findMany({ where: { engagementId }, orderBy: { displayOrder: 'asc' } }),
     prisma.noteGroup.findMany({ where: { engagementId } }),
+    prisma.tBVersion.findFirst({ where: { engagementId, isPriorYear: true } }),
   ]);
  
-  const ngMap   = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
-  const cyLines = allLines.filter(l => !l.isPriorYear);
-  const pyLines = allLines.filter(l => l.isPriorYear);
+  const ngMap = new Map(noteGroups.map(ng => [ng.noteGroupId, ng]));
+ 
+  // Split CY vs PY — fallback by tbVersionId if isPriorYear field is undefined
+  const hasField = allLines.length === 0 || allLines[0].isPriorYear !== undefined;
+  let cyLines, pyLines;
+  if (hasField) {
+    cyLines = allLines.filter(l => !l.isPriorYear);
+    pyLines = allLines.filter(l => !!l.isPriorYear);
+  } else {
+    const pyVersionId = pyTBVersion?.id;
+    cyLines = pyVersionId ? allLines.filter(l => l.tbVersionId !== pyVersionId) : allLines;
+    pyLines = pyVersionId ? allLines.filter(l => l.tbVersionId === pyVersionId) : [];
+  }
  
   const pyByGroup = new Map(pyLines.map(l => [l.groupName, l]));
   const hasPY     = pyLines.length > 0;
