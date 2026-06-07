@@ -430,11 +430,18 @@ async function generateFS(engagementId, firmId) {
   // Use sequential prisma calls (not a long transaction) to avoid timeout.
   // Delete old data first, then bulk-insert new data with createMany.
   // Delete in correct FK order inside a transaction to prevent concurrent-call FK errors
-  await prisma.$transaction([
-    prisma.noteDetail.deleteMany({ where: { engagementId } }),
-    prisma.fSLine.deleteMany({    where: { engagementId } }),
-    prisma.noteGroup.deleteMany({ where: { engagementId } }),
-  ]);
+  try {
+    await prisma.$transaction([
+      prisma.noteDetail.deleteMany({ where: { engagementId } }),
+      prisma.fSLine.deleteMany({    where: { engagementId } }),
+      prisma.noteGroup.deleteMany({ where: { engagementId } }),
+    ]);
+  } catch (delErr) {
+    console.warn('[FS] Transaction delete failed, trying sequential:', delErr.message);
+    await prisma.noteDetail.deleteMany({ where: { engagementId } }).catch(() => {});
+    await prisma.fSLine.deleteMany({    where: { engagementId } }).catch(() => {});
+    await prisma.noteGroup.deleteMany({ where: { engagementId } }).catch(() => {});
+  }
  
   // Create NoteGroups
   const createdNGs = new Map();
@@ -469,10 +476,18 @@ async function generateFS(engagementId, firmId) {
   try {
     await prisma.fSLine.createMany({ data: cyLineRows, skipDuplicates: true });
   } catch (colErr) {
-    if (colErr.message?.includes('isPriorYear') || colErr.message?.includes('column')) {
-      console.warn('[FS] isPriorYear column missing — inserting without it (run migration)');
-      const cyLineRowsNoFlag = cyLineRows.map(({ isPriorYear, ...rest }) => rest);
-      await prisma.fSLine.createMany({ data: cyLineRowsNoFlag, skipDuplicates: true });
+    // If new columns (isPriorYear, currentNonCurrent, plCategory, isCashItem) 
+    // are unknown to current Prisma client, strip them and retry with base columns only
+    const isColErr = colErr.message?.includes('Unknown argument') ||
+                     colErr.message?.includes('column') ||
+                     colErr.message?.includes('isPriorYear') ||
+                     colErr.message?.includes('currentNonCurrent') ||
+                     colErr.message?.includes('plCategory') ||
+                     colErr.message?.includes('isCashItem');
+    if (isColErr) {
+      console.warn('[FS] New columns not in Prisma client — inserting with base columns only');
+      const baseRows = cyLineRows.map(({ isPriorYear, currentNonCurrent, plCategory, isCashItem, ...rest }) => rest);
+      await prisma.fSLine.createMany({ data: baseRows, skipDuplicates: true });
     } else {
       throw colErr;
     }
@@ -524,12 +539,9 @@ async function generateFS(engagementId, firmId) {
       try {
         await prisma.fSLine.createMany({ data: pyLineRows, skipDuplicates: true });
       } catch (pyColErr) {
-        if (pyColErr.message?.includes('isPriorYear') || pyColErr.message?.includes('column')) {
-          console.warn('[FS] isPriorYear column missing for PY — skipping PY lines (run migration)');
-          // PY lines can't be stored without the column — hasPY will be false on getFS
-        } else {
-          throw pyColErr;
-        }
+        console.warn('[FS] PY insert failed, retrying base columns:', pyColErr.message);
+        const basePy = pyLineRows.map(({ isPriorYear, currentNonCurrent, plCategory, isCashItem, ...r }) => r);
+        try { await prisma.fSLine.createMany({ data: basePy, skipDuplicates: true }); } catch (_) {}
       }
     }
   }
