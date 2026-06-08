@@ -1,4 +1,3 @@
-
 // src/api/client.js
 import axios from 'axios';
  
@@ -66,6 +65,7 @@ export const engagementAPI = {
   list:                (clientId)        => api.get(`/engagements/client/${clientId}`),
   get:                 (id)              => api.get(`/engagements/${id}`),
   create:              (clientId, data)  => api.post('/engagements', { ...data, clientId }),
+  update:              (id, data)        => api.put(`/engagements/${id}`, data),
   lock:                (id, lock)        => api.patch(`/engagements/${id}/lock`, { lock }),
   validation:          (id)              => api.get(`/engagements/${id}/validation-checks`),
   runValidation:       (id)              => api.post(`/engagements/${id}/validation-checks`),
@@ -212,4 +212,3 @@ export const dataExportAPI = {
     responseType: 'blob', withCredentials: true, headers: authHeader()
   }).then(r => r.data),
 };
- 
