@@ -122,6 +122,28 @@ function ClientFormModal({ initial, firmRegion, onClose, onSaved }) {
   async function submit(e) {
     e.preventDefault();
     if (!form.name?.trim()) { toast.error('Company name is required'); return; }
+ 
+    // Validations
+    if (form.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) {
+      toast.error('Invalid email address'); return;
+    }
+    if (form.phone && !/^[+\d\s\-().]{7,20}$/.test(form.phone)) {
+      toast.error('Invalid phone number'); return;
+    }
+    if (form.region === 'India') {
+      if (form.pan && !/^[A-Z]{5}[0-9]{4}[A-Z]$/.test(form.pan.toUpperCase())) {
+        toast.error('Invalid PAN — format must be AAAAA0000A'); return;
+      }
+      if (form.gstin && !/^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$/.test(form.gstin.toUpperCase())) {
+        toast.error('Invalid GSTIN format'); return;
+      }
+    }
+    if (form.region === 'UAE') {
+      if (form.vatNumber && !/^\d{15}$/.test(form.vatNumber.replace(/\s/g,''))) {
+        toast.error('VAT Registration No. must be 15 digits'); return;
+      }
+    }
+ 
     setSaving(true);
     try {
       const payload = {
@@ -194,16 +216,19 @@ function ClientFormModal({ initial, firmRegion, onClose, onSaved }) {
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">{regionCfg.taxLabel}</label>
               <input
                 value={form.region === 'UAE' ? (form.vatNumber || '') : (form.pan || '')}
-                onChange={e => set(form.region === 'UAE' ? 'vatNumber' : 'pan', e.target.value)}
+                onChange={e => set(form.region === 'UAE' ? 'vatNumber' : 'pan', e.target.value.toUpperCase())}
                 className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 font-mono"
-                placeholder={regionCfg.taxPlaceholder} />
+                placeholder={regionCfg.taxPlaceholder}
+                title={form.region === 'UAE' ? '15-digit VAT registration number' : 'PAN format: AAAAA0000A'}
+                maxLength={form.region === 'UAE' ? 15 : 10} />
             </div>
             {form.region === 'India' && (
               <div>
                 <label className="block text-xs font-semibold text-slate-600 mb-1.5">GSTIN</label>
-                <input value={form.gstin || ''} onChange={e => set('gstin', e.target.value)}
+                <input value={form.gstin || ''} onChange={e => set('gstin', e.target.value.toUpperCase())}
                   className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400 font-mono"
-                  placeholder={regionCfg.gstPlaceholder} />
+                  placeholder={regionCfg.gstPlaceholder}
+                  title="15-character GSTIN" maxLength={15} />
               </div>
             )}
             <div>
@@ -216,7 +241,8 @@ function ClientFormModal({ initial, firmRegion, onClose, onSaved }) {
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">Phone</label>
               <input type="tel" value={form.phone || ''} onChange={e => set('phone', e.target.value)}
                 className="w-full border border-slate-300 rounded-xl px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-400"
-                placeholder={form.region === 'UAE' ? '+971 4 000 0000' : '+91 98765 43210'} />
+                placeholder={form.region === 'UAE' ? '+971 4 000 0000' : '+91 98765 43210'}
+                title="Phone number with country code" maxLength={20} />
             </div>
             <div className="col-span-2">
               <label className="block text-xs font-semibold text-slate-600 mb-1.5">Registered Address</label>
@@ -289,8 +315,11 @@ export default function Clients() {
   }
  
   const filtered = clients.filter(c => {
+    if (!c || typeof c !== 'object') return false;
     const q = search.toLowerCase();
-    const matchSearch = c.name.toLowerCase().includes(q) || (c.cin || c.tradeLicense || '').toLowerCase().includes(q);
+    const name = (c.name || '').toLowerCase();
+    const id   = (c.cin || c.tradeLicense || '').toLowerCase();
+    const matchSearch = name.includes(q) || id.includes(q);
     const matchRegion = filterRegion === 'All' || c.region === filterRegion;
     return matchSearch && matchRegion;
   });
