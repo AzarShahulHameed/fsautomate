@@ -9,9 +9,15 @@
 const { PrismaClient } = require('@prisma/client');
 
 // ── Neon-optimised connection string ─────────────────────────────────────────
-// Neon free tier: 5 max connections. pgbouncer multiplexes them.
-// connection_limit=3 leaves headroom for migrations and admin queries.
-// Without this, concurrent generateFS calls exhaust the pool and crash.
+// connection_limit is now driven by DB_CONNECTION_LIMIT so it can be raised
+// once you're off the Neon free tier, without a code change.
+//
+// How to size it: Neon plan's max connections ÷ number of running server
+// instances, minus headroom for migrations/admin queries. Free tier should
+// stay conservative (3-5) or you'll see pool-exhaustion errors under
+// concurrent load (e.g. multiple generateFS calls at once). Set this
+// explicitly in your environment — the default below is a safe floor for
+// free-tier, NOT a production value for 1000 users.
 function buildDatabaseUrl() {
   const base = process.env.DATABASE_URL;
   if (!base) return base;
@@ -19,16 +25,19 @@ function buildDatabaseUrl() {
   // Only modify Neon URLs (contains neon.tech) — leave local/other DBs untouched
   if (!base.includes('neon.tech')) return base;
 
+  const connectionLimit = process.env.DB_CONNECTION_LIMIT || '3';
+
   // Neon pgbouncer endpoint: replace -pooler if missing, add params
   // Neon provides two URLs: direct (neon.tech) and pooler (-pooler.neon.tech)
   // We use the pooler endpoint when available via DIRECT_URL for migrations
   try {
     const url = new URL(base);
-    // Add pgbouncer and connection_limit params for Neon serverless
     if (!url.searchParams.has('pgbouncer')) {
       url.searchParams.set('pgbouncer',       'true');
-      url.searchParams.set('connection_limit', '3');
+      url.searchParams.set('connection_limit', connectionLimit);
       url.searchParams.set('connect_timeout',  '10');
+    } else if (process.env.DB_CONNECTION_LIMIT) {
+      url.searchParams.set('connection_limit', connectionLimit);
     }
     return url.toString();
   } catch {

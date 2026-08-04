@@ -34,27 +34,25 @@ router.post('/register', async (req, res, next) => {
   }
 });
  
-// In-memory login attempt tracker — resets on restart
-// For production: use Redis with TTL
-const loginAttempts = new Map(); // email -> { count, firstAt }
+const { get: storeGet, set: storeSet, del: storeDel, incr: storeIncr, ttl: storeTtl } = require('../utils/tokenStore');
+
 const MAX_ATTEMPTS  = 10;
-const LOCKOUT_MS    = 15 * 60 * 1000; // 15 minutes
+const LOCKOUT_S     = 15 * 60; // 15 minutes, in seconds (Redis TTL is seconds)
  
 router.post('/login', async (req, res, next) => {
   try {
     const { email, password } = req.body;
     if (!email || !password) return res.status(400).json({ error: 'Email and password required' });
  
-    // Brute force check
+    // Brute force check — counter lives in Redis (falls back to in-memory
+    // in dev without REDIS_URL) so it survives restarts and works across
+    // multiple server instances.
     const attemptKey = email.toLowerCase().trim();
-    const attempt    = loginAttempts.get(attemptKey);
-    if (attempt && attempt.count >= MAX_ATTEMPTS) {
-      const elapsed = Date.now() - attempt.firstAt;
-      if (elapsed < LOCKOUT_MS) {
-        const remaining = Math.ceil((LOCKOUT_MS - elapsed) / 60000);
-        return res.status(429).json({ error: `Account temporarily locked due to too many failed attempts. Try again in ${remaining} minute${remaining !== 1 ? 's' : ''}.` });
-      }
-      loginAttempts.delete(attemptKey); // lockout expired
+    const attemptCount = (await storeGet('login-attempts', attemptKey)) || 0;
+    if (attemptCount >= MAX_ATTEMPTS) {
+      const remainingS = await storeTtl('login-attempts', attemptKey);
+      const remaining  = Math.max(1, Math.ceil((remainingS > 0 ? remainingS : LOCKOUT_S) / 60));
+      return res.status(429).json({ error: `Account temporarily locked due to too many failed attempts. Try again in ${remaining} minute${remaining !== 1 ? 's' : ''}.` });
     }
  
     const user = await prisma.user.findFirst({
@@ -62,14 +60,14 @@ router.post('/login', async (req, res, next) => {
       include: { firm: true },
     });
     if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
-      // Record failed attempt
-      const current = loginAttempts.get(attemptKey) || { count: 0, firstAt: Date.now() };
-      loginAttempts.set(attemptKey, { count: current.count + 1, firstAt: current.firstAt });
+      // Record failed attempt — increments a Redis counter with a 15min TTL
+      // that resets the window on the first failure, matching the old logic.
+      await storeIncr('login-attempts', attemptKey, LOCKOUT_S);
       return res.status(401).json({ error: 'Invalid email or password' });
     }
  
     // Successful login — clear attempts
-    loginAttempts.delete(attemptKey);
+    await storeDel('login-attempts', attemptKey);
     const token = jwt.sign({ userId: user.id, firmId: user.firmId }, process.env.JWT_SECRET, { expiresIn: '8h' });
     const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
     await prisma.userSession.create({ data: { userId: user.id, token, expiresAt } });
@@ -192,10 +190,10 @@ router.patch('/password', authGuard, async (req, res, next) => {
   } catch (err) { next(err); }
 });
  
-// ── In-memory stores (replace with Redis for multi-instance production) ──────
-const resetTokens   = new Map(); // token → { userId, email, expiresAt }
-const pendingInvites = new Map(); // token → { firmId, email, role, ... }
- 
+// Reset tokens and pending invites are stored via tokenStore (Redis-backed,
+// TTL-native) — see comment on MAX_ATTEMPTS above for why this replaced the
+// old in-memory Maps.
+
 // POST /api/auth/forgot-password
 router.post('/forgot-password', async (req, res, next) => {
   try {
@@ -210,10 +208,9 @@ router.post('/forgot-password', async (req, res, next) => {
     if (!user) return res.json({ sent: true });
  
     const { randomBytes } = require('crypto');
-    const token     = randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 30 * 60 * 1000);
-    resetTokens.set(token, { userId: user.id, email: user.email, expiresAt });
-    setTimeout(() => resetTokens.delete(token), 30 * 60 * 1000);
+    const token   = randomBytes(32).toString('hex');
+    const TTL_S   = 30 * 60; // 30 minutes
+    await storeSet('reset-token', token, { userId: user.id, email: user.email }, TTL_S);
  
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     await sendEmail({
@@ -232,15 +229,15 @@ router.post('/reset-password', async (req, res, next) => {
     if (!token || !password) return res.status(400).json({ error: 'Token and password required' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
  
-    const record = resetTokens.get(token);
-    if (!record || record.expiresAt < new Date())
+    const record = await storeGet('reset-token', token);
+    if (!record)
       return res.status(400).json({ error: 'Reset link expired or invalid. Request a new one.' });
  
     const bcrypt = require('bcryptjs');
     const hash   = await bcrypt.hash(password, 12);
     await prisma.user.update({ where: { id: record.userId }, data: { passwordHash: hash, updatedAt: new Date() } });
     await prisma.userSession.deleteMany({ where: { userId: record.userId } });
-    resetTokens.delete(token);
+    await storeDel('reset-token', token);
     res.json({ reset: true });
   } catch (err) { next(err); }
 });
@@ -261,10 +258,12 @@ router.post('/invite', authGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (r
     const firm = await prisma.firm.findUnique({ where: { id: req.firmId } });
  
     const { randomBytes } = require('crypto');
-    const token     = randomBytes(32).toString('hex');
-    const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000);
-    pendingInvites.set(token, { firmId: req.firmId, firmSlug: firm.slug, firmName: firm.name, email: email.toLowerCase().trim(), role, inviterName: req.user.name, expiresAt });
-    setTimeout(() => pendingInvites.delete(token), 48 * 60 * 60 * 1000);
+    const token = randomBytes(32).toString('hex');
+    const TTL_S = 48 * 60 * 60; // 48 hours
+    await storeSet('invite-token', token, {
+      firmId: req.firmId, firmSlug: firm.slug, firmName: firm.name,
+      email: email.toLowerCase().trim(), role, inviterName: req.user.name,
+    }, TTL_S);
  
     const frontendUrl = process.env.FRONTEND_URL || 'http://localhost:5173';
     await sendEmail({
@@ -279,8 +278,8 @@ router.post('/invite', authGuard, requireRole('FIRM_ADMIN', 'MANAGER'), async (r
 // GET /api/auth/invite/:token — validate before showing accept form
 router.get('/invite/:token', async (req, res, next) => {
   try {
-    const record = pendingInvites.get(req.params.token);
-    if (!record || record.expiresAt < new Date())
+    const record = await storeGet('invite-token', req.params.token);
+    if (!record)
       return res.status(400).json({ error: 'Invite link expired or invalid' });
     res.json({ valid: true, email: record.email, firmName: record.firmName, role: record.role });
   } catch (err) { next(err); }
@@ -293,12 +292,12 @@ router.post('/accept-invite', async (req, res, next) => {
     if (!token || !name || !password) return res.status(400).json({ error: 'Token, name and password required' });
     if (password.length < 8) return res.status(400).json({ error: 'Password must be at least 8 characters' });
  
-    const record = pendingInvites.get(token);
-    if (!record || record.expiresAt < new Date())
+    const record = await storeGet('invite-token', token);
+    if (!record)
       return res.status(400).json({ error: 'Invite link expired. Ask for a new invitation.' });
  
     const existing = await prisma.user.findFirst({ where: { email: record.email, firmId: record.firmId } });
-    if (existing) { pendingInvites.delete(token); return res.status(409).json({ error: 'Account already exists in this firm' }); }
+    if (existing) { await storeDel('invite-token', token); return res.status(409).json({ error: 'Account already exists in this firm' }); }
  
     const bcrypt = require('bcryptjs');
     const jwt    = require('jsonwebtoken');
@@ -308,7 +307,7 @@ router.post('/accept-invite', async (req, res, next) => {
       data: { firmId: record.firmId, email: record.email, passwordHash: await bcrypt.hash(password, 12), name: name.trim(), role: record.role, isActive: true },
       include: { firm: true },
     });
-    pendingInvites.delete(token);
+    await storeDel('invite-token', token);
  
     const jwtToken = jwt.sign({ userId: user.id, firmId: user.firmId }, process.env.JWT_SECRET, { expiresIn: '8h' });
     await prisma.userSession.create({ data: { id: uuid(), userId: user.id, token: jwtToken, expiresAt: new Date(Date.now() + 8*60*60*1000) } });
