@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import toast from 'react-hot-toast';
-import { mappingAPI, fsAPI, notesAPI, tbAPI, exportAPI } from '../api/client';
+import { mappingAPI, fsAPI, notesAPI, tbAPI, exportAPI, pollGenerateJob } from '../api/client';
 import { useStore } from '../store';
  
 const UNITS = [
@@ -250,7 +250,15 @@ export default function Mapping() {
     // Navigate immediately — don't let notesAPI failure block the redirect
     navigate(`/engagements/${engagementId}/fs`);
     try {
-      await fsAPI.generate(engagementId);
+      const res = await fsAPI.generate(engagementId);
+
+      // Queue enabled: wait for the background job to actually finish
+      // before triggering notes generation (notes depend on FS lines
+      // existing) or showing the success toast.
+      if (res?.jobId) {
+        await pollGenerateJob(engagementId, res.jobId);
+      }
+
       toast.success('Financial statements generated!');
       // Notes generate in background — failure is non-blocking
       notesAPI.generate(engagementId).catch(() => {});

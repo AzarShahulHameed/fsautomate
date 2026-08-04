@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useParams, useSearchParams } from 'react-router-dom';
-import { fsAPI } from '../api/client';
+import { fsAPI, pollGenerateJob } from '../api/client';
 import { useStore } from '../store';
 import toast from 'react-hot-toast';
  
@@ -964,22 +964,41 @@ export default function FinancialStatements() {
   async function generate() {
     setGenerating(true);
     try {
-      const res     = await fsAPI.generate(engagementId);
-      const sheets  = res.sheets || res;
-      setData(sheets);
-      setHasPY(res.hasPY || false);
-      if (res.errors?.length > 0) {
-        setFsErrors(res.errors);
-        toast.error(`Generated with ${res.errors.length} issue(s) — check validation`);
-      } else {
-        setFsErrors([]);
-        const msg = res.hasPY
-          ? 'Financial statements generated with comparative figures ✓'
-          : 'Financial statements generated — upload prior year TB for comparative column';
-        toast.success(msg);
+      const res = await fsAPI.generate(engagementId);
+
+      // Queue enabled (production): backend returns { jobId, status: 'queued' }
+      // immediately and does the actual work on a background worker. Poll
+      // until it's done instead of blocking on one long request.
+      if (res?.jobId) {
+        const result = await pollGenerateJob(engagementId, res.jobId);
+        applyGenerateResult(result);
+        return;
       }
-    } catch (err) { toast.error(err?.error || 'Generation failed'); }
-    finally { setGenerating(false); }
+
+      // Queue not configured (e.g. local dev without REDIS_URL): backend
+      // ran generation inline and this response IS the final result.
+      applyGenerateResult(res);
+    } catch (err) {
+      toast.error(err?.error || 'Generation failed');
+      setGenerating(false);
+    }
+  }
+
+  function applyGenerateResult(res) {
+    const sheets = res.sheets || res;
+    setData(sheets);
+    setHasPY(res.hasPY || false);
+    if (res.errors?.length > 0) {
+      setFsErrors(res.errors);
+      toast.error(`Generated with ${res.errors.length} issue(s) — check validation`);
+    } else {
+      setFsErrors([]);
+      const msg = res.hasPY
+        ? 'Financial statements generated with comparative figures ✓'
+        : 'Financial statements generated — upload prior year TB for comparative column';
+      toast.success(msg);
+    }
+    setGenerating(false);
   }
  
   const allLines   = Object.values(data || {}).flat();

@@ -3,6 +3,7 @@
 'use strict';
 const router = require('express').Router();
 const { authGuard, engagementGuard } = require('../middleware/tenant');
+const { fsGenerationQueue, queueEnabled } = require('../config/queue');
  
 // Both services loaded lazily so server starts even if a dependency is missing
 function getFsService() {
@@ -15,10 +16,44 @@ function getValidationService() {
 router.use(authGuard);
  
 // POST /:engagementId/generate — generate FS from mapped TB
+//
+// Was: ran generateFS() inline, holding the request (and a DB connection)
+// for the full computation. Now: enqueues a job on the fs-generation queue
+// and returns immediately with a jobId to poll — unless REDIS_URL isn't
+// set, in which case it falls back to the old inline behavior so local dev
+// without Redis running still works exactly as before.
 router.post('/:engagementId/generate', engagementGuard, async (req, res, next) => {
   try {
-    const result = await getFsService().generateFS(req.params.engagementId, req.firmId);
-    res.json(result);
+    if (!queueEnabled) {
+      const result = await getFsService().generateFS(req.params.engagementId, req.firmId);
+      return res.json(result);
+    }
+    const job = await fsGenerationQueue.add('generate', {
+      engagementId: req.params.engagementId,
+      firmId:       req.firmId,
+    }, {
+      removeOnComplete: { age: 3600 }, // keep completed jobs 1h for status polling, then clean up
+      removeOnFail:     { age: 86400 },
+    });
+    res.status(202).json({ jobId: job.id, status: 'queued' });
+  } catch (err) { next(err); }
+});
+ 
+// GET /:engagementId/generate-status/:jobId — poll a queued/running generation job
+router.get('/:engagementId/generate-status/:jobId', engagementGuard, async (req, res, next) => {
+  try {
+    if (!queueEnabled) return res.status(404).json({ error: 'Job queue not enabled' });
+    const job = await fsGenerationQueue.getJob(req.params.jobId);
+    if (!job) return res.status(404).json({ error: 'Job not found or expired' });
+
+    const state = await job.getState(); // 'waiting' | 'active' | 'completed' | 'failed' | 'delayed'
+    if (state === 'completed') {
+      return res.json({ status: 'completed', result: job.returnvalue });
+    }
+    if (state === 'failed') {
+      return res.json({ status: 'failed', error: job.failedReason || 'Generation failed' });
+    }
+    res.json({ status: state }); // waiting / active / delayed — frontend keeps polling
   } catch (err) { next(err); }
 });
  

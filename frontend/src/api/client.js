@@ -120,9 +120,25 @@ export const mappingAPI = {
 };
  
 export const fsAPI = {
-  generate: (eid) => api.post(`/fs/${eid}/generate`),
-  get:      (eid) => api.get(`/fs/${eid}`),
+  generate:       (eid)         => api.post(`/fs/${eid}/generate`),
+  generateStatus: (eid, jobId)  => api.get(`/fs/${eid}/generate-status/${jobId}`),
+  get:            (eid)         => api.get(`/fs/${eid}`),
 };
+
+// Shared by any page that kicks off FS generation (currently Mapping and
+// FinancialStatements) — polls until the background job finishes or fails.
+// Only relevant when the backend has REDIS_URL set and returned a jobId;
+// callers should check for that before invoking this.
+export async function pollGenerateJob(engagementId, jobId, { intervalMs = 1500, maxAttempts = 80 } = {}) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    await new Promise(r => setTimeout(r, intervalMs));
+    const status = await fsAPI.generateStatus(engagementId, jobId);
+    if (status.status === 'completed') return status.result;
+    if (status.status === 'failed') throw { error: status.error || 'Generation failed' };
+    // waiting / active / delayed — keep polling
+  }
+  throw { error: 'Generation is taking longer than expected. Refresh in a moment and check again.' };
+}
  
 export const notesAPI = {
   generate:    (eid)            => api.post(`/notes/${eid}/generate`),
