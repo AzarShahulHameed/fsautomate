@@ -40,7 +40,15 @@ api.interceptors.request.use((config) => {
 api.interceptors.response.use(
   (res) => res.data,
   (err) => {
-    if (err.response?.status === 401) {
+    // skipAuthRedirect lets a caller handle its own 401 instead of forcing
+    // a full-page redirect — needed for checkAuth()'s own /me call, which
+    // runs on every app load INCLUDING public pages like /login, where a
+    // 401 just means "not logged in yet," not "session expired, kick them
+    // out." Without this, that routine 401 triggers window.location.href
+    // to /login, which is a hard reload, which remounts the app, which
+    // calls checkAuth() again, which 401s again — an infinite redirect loop
+    // for anyone not logged in.
+    if (err.response?.status === 401 && !err.config?.skipAuthRedirect) {
       window.location.href = '/login';
     }
     return Promise.reject(err?.response?.data || err);
@@ -53,7 +61,7 @@ export const authAPI = {
   login:          (data) => api.post('/auth/login', data),
   register:       (data) => api.post('/auth/register', data),
   logout:         ()     => api.post('/auth/logout'),
-  me:             ()     => api.get('/auth/me'),
+  me:             (config) => api.get('/auth/me', config),
   savePageState:  (ps)   => api.patch('/auth/page-state', { pageState: ps }),
   getPageState:   ()     => api.get('/auth/page-state'),
   updateProfile:  (data) => api.patch('/auth/profile', data),

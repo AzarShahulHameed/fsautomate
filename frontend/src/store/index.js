@@ -27,7 +27,7 @@ export const useStore = create(
       // exists /auth/me succeeds without us handling any token directly.
       checkAuth: async () => {
         try {
-          const res = await authAPI.me();
+          const res = await authAPI.me({ skipAuthRedirect: true });
           const { firm, ...user } = res;
           set({ user, firm, isAuthenticated: true, authChecked: true });
         } catch (_) {
