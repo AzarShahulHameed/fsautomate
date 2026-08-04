@@ -25,6 +25,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 'use strict';
 const IORedis = require('ioredis');
+const logger = require('./logger');
 
 const redisUrl = process.env.REDIS_URL;
 const queueEnabled = !!redisUrl;
@@ -36,12 +37,12 @@ if (queueEnabled) {
   connection = new IORedis(redisUrl, {
     maxRetriesPerRequest: null, // required by BullMQ
   });
-  connection.on('error', (err) => console.error('[Queue] Redis connection error:', err.message));
+  connection.on('error', (err) => logger.error('[Queue] Redis connection error', { error: err.message }));
 
   const { Queue } = require('bullmq');
   fsGenerationQueue = new Queue('fs-generation', { connection });
 } else {
-  console.warn('[Queue] REDIS_URL not set — FS generation will run inline in the ' +
+  logger.warn('[Queue] REDIS_URL not set — FS generation will run inline in the ' +
     'request instead of on a background queue. Fine for local dev; set REDIS_URL ' +
     'and run `npm run worker` as a separate process before deploying at scale.');
 }

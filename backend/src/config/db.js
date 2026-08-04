@@ -7,6 +7,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 'use strict';
 const { PrismaClient } = require('@prisma/client');
+const logger = require('./logger');
 
 // ── Neon-optimised connection string ─────────────────────────────────────────
 // connection_limit is now driven by DB_CONNECTION_LIMIT so it can be raised
@@ -68,7 +69,7 @@ async function withRetry(fn, attempt = 1) {
 
     if (isRetryable && attempt < MAX_RETRIES) {
       const delay = attempt * 500; // 500ms, 1000ms
-      console.warn(`[DB] Transient error (${err?.code || err?.message?.slice(0, 40)}), retry ${attempt}/${MAX_RETRIES - 1} in ${delay}ms`);
+      logger.warn(`[DB] Transient error, retrying (${attempt}/${MAX_RETRIES - 1})`, { code: err?.code, message: err?.message?.slice(0, 200), delayMs: delay });
       await new Promise(r => setTimeout(r, delay));
       return withRetry(fn, attempt + 1);
     }
@@ -103,9 +104,9 @@ const prismaWithRetry = new Proxy(prisma, {
 async function disconnectDB() {
   try {
     await prisma.$disconnect();
-    console.log('[DB] Disconnected cleanly');
+    logger.info('[DB] Disconnected cleanly');
   } catch (e) {
-    console.error('[DB] Disconnect error:', e.message);
+    logger.error('[DB] Disconnect error', { error: e.message });
   }
 }
 

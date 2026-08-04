@@ -12,6 +12,7 @@ const { RedisStore: RateLimitRedisStore } = require('rate-limit-redis');
  
 const { prisma }               = require('./src/config/db');
 const { redisClient, redisEnabled } = require('./src/config/redis');
+const logger              = require('./src/config/logger');
 const { auditMiddleware } = require('./src/middleware/audit');
 const authRoutes          = require('./src/routes/auth.routes');
 const clientRoutes        = require('./src/routes/client.routes');
@@ -95,7 +96,7 @@ app.use(session({
   },
 }));
 if (!redisEnabled) {
-  console.warn('[Session] Using in-memory MemoryStore — fine for local dev only. ' +
+  logger.warn('[Session] Using in-memory MemoryStore — fine for local dev only. ' +
     'Set REDIS_URL before deploying more than one instance.');
 }
  
@@ -123,8 +124,46 @@ app.use('/api', rateLimit({
 // ─── Audit logging ─────────────────────────────────────────────────────────
 app.use(auditMiddleware);
  
+// ─── Request logging ─────────────────────────────────────────────────────────
+// Was entirely absent — no record of what requests came in, how long they
+// took, or what status they returned, beyond whatever you happened to be
+// watching in a terminal at the time. This logs one structured line per
+// request on completion; skip /health to avoid drowning real traffic in
+// uptime-ping noise.
+app.use((req, res, next) => {
+  const startedAt = Date.now();
+  res.on('finish', () => {
+    if (req.path === '/health') return;
+    const durationMs = Date.now() - startedAt;
+    const level = res.statusCode >= 500 ? 'error' : res.statusCode >= 400 ? 'warn' : 'info';
+    logger[level]('request', {
+      method: req.method, path: req.path, status: res.statusCode,
+      durationMs, firmId: req.firmId || null, userId: req.user?.id || null,
+    });
+  });
+  next();
+});
+ 
 // ─── Health check ──────────────────────────────────────────────────────────
-app.get('/health', (_req, res) => res.json({ status: 'ok', ts: new Date().toISOString() }));
+// Was: always returned "ok" regardless of whether the DB or Redis were
+// actually reachable — an orchestrator (or you, checking at 3am) could see
+// a green health check while the DB pool was fully exhausted underneath it.
+// Now actually checks both, and reports Redis/queue status as a soft
+// dependency (degraded, not down — sessions/queue fall back gracefully).
+app.get('/health', async (_req, res) => {
+  const result = { status: 'ok', ts: new Date().toISOString(), checks: {} };
+  try {
+    await prisma.$queryRawUnsafe('SELECT 1');
+    result.checks.database = 'ok';
+  } catch (err) {
+    result.checks.database = 'error';
+    result.status = 'error';
+    logger.error('[Health] Database check failed', { error: err.message });
+  }
+  result.checks.redis = redisEnabled ? (redisClient?.isOpen ? 'ok' : 'disconnected') : 'disabled';
+  if (redisEnabled && !redisClient?.isOpen) result.status = 'degraded';
+  res.status(result.status === 'error' ? 503 : 200).json(result);
+});
  
 // ─── API Routes ────────────────────────────────────────────────────────────
 app.use('/api/auth',        authRoutes);
@@ -143,8 +182,11 @@ app.use('/api/upload',      uploadRoutes);
 app.use((_req, res) => res.status(404).json({ error: 'Not found' }));
  
 // ─── Global error handler ──────────────────────────────────────────────────
-app.use((err, _req, res, _next) => {
-  console.error('[ERROR]', err.message);
+app.use((err, req, res, _next) => {
+  logger.error('[ERROR] ' + err.message, {
+    stack: err.stack, method: req.method, path: req.path,
+    firmId: req.firmId || null, userId: req.user?.id || null,
+  });
   res.status(err.status || 500).json({
     error: err.message || 'Internal server error',
     code:  err.code    || 'INTERNAL_ERROR',
@@ -156,11 +198,28 @@ async function start() {
   if (redisEnabled) {
     await redisClient.connectPromise; // wait for the eager connect kicked off in config/redis.js
   }
-  app.listen(PORT, () => console.log(`[FinStatement API] Listening on port ${PORT}`));
+  app.listen(PORT, () => logger.info(`[FinStatement API] Listening on port ${PORT}`));
 }
 start();
  
+// These didn't exist before — an uncaught exception or unhandled promise
+// rejection anywhere in the app would previously either crash the process
+// with no record beyond whatever scrolled past in the terminal, or in some
+// Node versions just silently keep running in a possibly-broken state.
+// Both are now logged with a stack trace before exiting, so a restart at
+// least leaves a trail of why.
+process.on('uncaughtException', (err) => {
+  logger.error('[FATAL] Uncaught exception', { message: err.message, stack: err.stack });
+  process.exit(1);
+});
+process.on('unhandledRejection', (reason) => {
+  logger.error('[FATAL] Unhandled promise rejection', {
+    message: reason?.message || String(reason), stack: reason?.stack,
+  });
+});
+ 
 process.on('SIGTERM', async () => {
+  logger.info('[Shutdown] SIGTERM received, shutting down gracefully...');
   await prisma.$disconnect();
   if (redisEnabled && redisClient?.isOpen) await redisClient.quit();
   process.exit(0);

@@ -12,11 +12,12 @@
 // ─────────────────────────────────────────────────────────────────────────────
 'use strict';
 const { createClient } = require('redis');
+const logger = require('./logger');
 
 const redisUrl = process.env.REDIS_URL;
 
 if (!redisUrl) {
-  console.warn('[Redis] REDIS_URL not set — sessions, rate limiting, and token ' +
+  logger.warn('[Redis] REDIS_URL not set — sessions, rate limiting, and token ' +
     'storage will fall back to in-memory storage. This is NOT safe for more ' +
     'than one server instance or for surviving restarts. Set REDIS_URL before ' +
     'deploying at scale.');
@@ -32,13 +33,13 @@ const redisClient = redisUrl
   : null;
 
 if (redisClient) {
-  redisClient.on('error', (err) => console.error('[Redis] Client error:', err.message));
-  redisClient.on('connect', () => console.log('[Redis] Connected'));
-  redisClient.on('reconnecting', () => console.warn('[Redis] Reconnecting...'));
+  redisClient.on('error', (err) => logger.error('[Redis] Client error', { error: err.message }));
+  redisClient.on('connect', () => logger.info('[Redis] Connected'));
+  redisClient.on('reconnecting', () => logger.warn('[Redis] Reconnecting...'));
 
   // Connect eagerly at boot. server.js awaits this before listening.
   redisClient.connectPromise = redisClient.connect().catch((err) => {
-    console.error('[Redis] Initial connection failed:', err.message);
+    logger.error('[Redis] Initial connection failed', { error: err.message });
   });
 }
 

@@ -7,6 +7,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 'use strict';
 const { prisma } = require('../config/db');
+const logger = require('../config/logger');
 
 // Route → human description template
 // :entityName and :fy are replaced with actual values if available
@@ -111,7 +112,13 @@ async function auditMiddleware(req, res, next) {
           },
         });
       }
-    } catch (_) { /* never crash on audit */ }
+    } catch (err) {
+      // Still never crashes the request on an audit-log failure — that
+      // would be worse than a missing log entry — but it was previously
+      // completely silent, so a broken audit trail could go unnoticed
+      // indefinitely. Now at least it's visible.
+      logger.error('[Audit] Failed to write audit log entry', { error: err.message, path: req.path });
+    }
   });
 
   next();

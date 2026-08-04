@@ -11,9 +11,10 @@
 const { Worker } = require('bullmq');
 const { queueConnection, queueEnabled } = require('../config/queue');
 const { prisma, disconnectDB } = require('../config/db');
+const logger = require('../config/logger');
 
 if (!queueEnabled) {
-  console.error('[Worker] REDIS_URL is not set — the worker has nothing to connect to. Exiting.');
+  logger.error('[Worker] REDIS_URL is not set — the worker has nothing to connect to. Exiting.');
   process.exit(1);
 }
 
@@ -25,7 +26,7 @@ const fsGenerationWorker = new Worker(
   'fs-generation',
   async (job) => {
     const { engagementId, firmId } = job.data;
-    console.log(`[Worker] Processing fs-generation job ${job.id} — engagement ${engagementId}`);
+    logger.info('[Worker] Processing fs-generation job', { jobId: job.id, engagementId });
     const result = await generateFS(engagementId, firmId);
     return result;
   },
@@ -33,17 +34,17 @@ const fsGenerationWorker = new Worker(
 );
 
 fsGenerationWorker.on('completed', (job) => {
-  console.log(`[Worker] Job ${job.id} completed (engagement ${job.data.engagementId})`);
+  logger.info('[Worker] Job completed', { jobId: job.id, engagementId: job.data.engagementId });
 });
 
 fsGenerationWorker.on('failed', (job, err) => {
-  console.error(`[Worker] Job ${job?.id} failed (engagement ${job?.data?.engagementId}):`, err.message);
+  logger.error('[Worker] Job failed', { jobId: job?.id, engagementId: job?.data?.engagementId, error: err.message });
 });
 
-console.log(`[Worker] fs-generation worker started, concurrency=${CONCURRENCY}`);
+logger.info(`[Worker] fs-generation worker started`, { concurrency: CONCURRENCY });
 
 process.on('SIGTERM', async () => {
-  console.log('[Worker] SIGTERM received, shutting down gracefully...');
+  logger.info('[Worker] SIGTERM received, shutting down gracefully...');
   await fsGenerationWorker.close();
   await disconnectDB();
   process.exit(0);
