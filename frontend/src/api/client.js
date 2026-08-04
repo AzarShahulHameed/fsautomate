@@ -9,11 +9,33 @@ const api = axios.create({
   timeout: 60000,
 });
  
-// No request interceptor needed anymore — the backend sets an httpOnly
+// No auth-token interceptor needed anymore — the backend sets an httpOnly
 // cookie on login/invite-accept/OAuth, and withCredentials above makes the
 // browser attach it automatically. We no longer read a JWT out of
 // localStorage and never had a token to hand it (an XSS bug anywhere in the
 // app could otherwise read it straight out of storage and exfiltrate it).
+ 
+// CSRF protection: the backend also sets a second, readable cookie
+// (fs_csrf) alongside the httpOnly auth cookie. Every state-changing
+// request must echo its value back in a header — see backend/src/utils/csrf.js
+// for why (short version: SameSite=None auth cookies are needed for the
+// cross-site Vercel/Render setup, and that alone is forgeable by a
+// malicious page's auto-submitting form; a header isn't, since a foreign
+// page can't read this cookie to copy it).
+function readCookie(name) {
+  const match = document.cookie.match(new RegExp('(?:^|; )' + name + '=([^;]*)'));
+  return match ? decodeURIComponent(match[1]) : null;
+}
+ 
+const CSRF_METHODS = new Set(['post', 'put', 'patch', 'delete']);
+ 
+api.interceptors.request.use((config) => {
+  if (CSRF_METHODS.has((config.method || '').toLowerCase())) {
+    const csrfToken = readCookie('fs_csrf');
+    if (csrfToken) config.headers['X-CSRF-Token'] = csrfToken;
+  }
+  return config;
+});
  
 api.interceptors.response.use(
   (res) => res.data,

@@ -6,6 +6,7 @@ const jwt     = require('jsonwebtoken');
 const { v4: uuid } = require('uuid');
 const { prisma } = require('../config/db');
 const { setAuthCookie } = require('../utils/authCookie');
+const { issueCsrfToken } = require('../utils/csrf');
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const JWT_SECRET   = process.env.JWT_SECRET;
@@ -77,6 +78,7 @@ async function createSessionAndRedirect(res, userData) {
   });
 
   setAuthCookie(res, token);
+  issueCsrfToken(res);
 
   // Previously: token (and email, name, avatar) went out in the redirect
   // URL query string. That's a leak on its own — URLs land in browser

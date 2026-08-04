@@ -33,6 +33,41 @@ const PLAN_PRICING = {
   },
 };
 
+// POST /api/billing/webhook — Razorpay webhook (set in Razorpay dashboard)
+// URL: https://fsautomate.onrender.com/api/billing/webhook
+// No auth — verified via webhook signature.
+// IMPORTANT: this must be registered BEFORE router.use(authGuard) below.
+// It previously sat after it, meaning Razorpay's webhook calls — which
+// carry a signature, not a session cookie or Bearer token — were being
+// rejected with 401 before ever reaching the signature check. Payment
+// confirmations were silently never processing.
+router.post('/webhook', async (req, res, next) => {
+  try {
+    if (!process.env.RAZORPAY_WEBHOOK_SECRET) return res.json({ received: true });
+
+    const sig      = req.headers['x-razorpay-signature'];
+    const body     = JSON.stringify(req.body);
+    const expected = crypto.createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET).update(body).digest('hex');
+    if (sig !== expected) return res.status(400).json({ error: 'Invalid signature' });
+
+    const event = req.body;
+    if (event.event === 'payment.captured') {
+      const notes = event.payload?.payment?.entity?.notes || {};
+      if (notes.firmId && notes.targetPlan) {
+        await upgradePlan(notes.firmId, notes.targetPlan, event.payload.payment.entity.id, null);
+      }
+    }
+    if (event.event === 'subscription.charged') {
+      const sub = event.payload?.subscription?.entity;
+      if (sub?.notes?.firmId) {
+        const expiresAt = new Date(sub.current_end * 1000);
+        await upgradePlan(sub.notes.firmId, sub.notes.targetPlan, null, expiresAt);
+      }
+    }
+    res.json({ received: true });
+  } catch (err) { next(err); }
+});
+
 router.use(authGuard);
 
 // GET /api/billing/plan — get current plan info
@@ -116,36 +151,6 @@ router.post('/verify-payment', requireRole('FIRM_ADMIN'), async (req, res, next)
 
     await upgradePlan(req.firmId, targetPlan, razorpay_payment_id, null);
     res.json({ success: true, plan: targetPlan });
-  } catch (err) { next(err); }
-});
-
-// POST /api/billing/webhook — Razorpay webhook (set in Razorpay dashboard)
-// URL: https://fsautomate.onrender.com/api/billing/webhook
-// No auth — verified via webhook signature
-router.post('/webhook', async (req, res, next) => {
-  try {
-    if (!process.env.RAZORPAY_WEBHOOK_SECRET) return res.json({ received: true });
-
-    const sig      = req.headers['x-razorpay-signature'];
-    const body     = JSON.stringify(req.body);
-    const expected = crypto.createHmac('sha256', process.env.RAZORPAY_WEBHOOK_SECRET).update(body).digest('hex');
-    if (sig !== expected) return res.status(400).json({ error: 'Invalid signature' });
-
-    const event = req.body;
-    if (event.event === 'payment.captured') {
-      const notes = event.payload?.payment?.entity?.notes || {};
-      if (notes.firmId && notes.targetPlan) {
-        await upgradePlan(notes.firmId, notes.targetPlan, event.payload.payment.entity.id, null);
-      }
-    }
-    if (event.event === 'subscription.charged') {
-      const sub = event.payload?.subscription?.entity;
-      if (sub?.notes?.firmId) {
-        const expiresAt = new Date(sub.current_end * 1000);
-        await upgradePlan(sub.notes.firmId, sub.notes.targetPlan, null, expiresAt);
-      }
-    }
-    res.json({ received: true });
   } catch (err) { next(err); }
 });
 

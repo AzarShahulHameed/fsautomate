@@ -8,6 +8,7 @@ const { v4: uuid } = require('uuid');
 const { prisma } = require('../config/db');
 const { authGuard, requireRole } = require('../middleware/tenant');
 const { setAuthCookie, clearAuthCookie, readToken } = require('../utils/authCookie');
+const { issueCsrfToken, clearCsrfCookie } = require('../utils/csrf');
  
 router.post('/register', async (req, res, next) => {
   try {
@@ -73,6 +74,7 @@ router.post('/login', async (req, res, next) => {
     const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
     await prisma.userSession.create({ data: { userId: user.id, token, expiresAt } });
     setAuthCookie(res, token); // httpOnly — not readable by JS, so not stored in localStorage anymore
+    issueCsrfToken(res);       // readable cookie — frontend echoes this back in a header on writes
     res.json({
       user: { id: user.id, email: user.email, name: user.name, role: user.role, avatar: user.avatar||null, phone: user.phone||null, designation: user.designation||null },
       firm: { id: user.firm.id, name: user.firm.name, slug: user.firm.slug, region: user.firm.region||'India', currency: user.firm.currency||'INR' },
@@ -85,12 +87,16 @@ router.post('/logout', authGuard, async (req, res, next) => {
     const token = readToken(req);
     if (token) await prisma.userSession.deleteMany({ where: { token } });
     clearAuthCookie(res);
+    clearCsrfCookie(res);
     res.json({ message: 'Logged out' });
   } catch (err) { next(err); }
 });
  
 router.get('/me', authGuard, (req, res) => {
   const u = req.user;
+  // Reissue the CSRF cookie here too — covers browsers with a session that
+  // predates this change and never got one from /login.
+  issueCsrfToken(res);
   res.json({
     id: u.id, email: u.email, name: u.name, role: u.role,
     avatar: u.avatar||null, phone: u.phone||null, designation: u.designation||null,
@@ -314,6 +320,7 @@ router.post('/accept-invite', async (req, res, next) => {
     const jwtToken = jwt.sign({ userId: user.id, firmId: user.firmId }, process.env.JWT_SECRET, { expiresIn: '8h' });
     await prisma.userSession.create({ data: { id: uuid(), userId: user.id, token: jwtToken, expiresAt: new Date(Date.now() + 8*60*60*1000) } });
     setAuthCookie(res, jwtToken);
+    issueCsrfToken(res);
  
     res.status(201).json({
       user:  { id: user.id, name: user.name, email: user.email, role: user.role, firmId: user.firmId },

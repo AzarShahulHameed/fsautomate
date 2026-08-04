@@ -5,7 +5,8 @@
 'use strict';
 const jwt    = require('jsonwebtoken');
 const { prisma } = require('../config/db');
-const { readToken } = require('../utils/authCookie');
+const { readToken, COOKIE_NAME } = require('../utils/authCookie');
+const { verifyCsrf } = require('../utils/csrf');
 
 const sql = (q, ...p) => prisma.$queryRawUnsafe(q, ...p);
 
@@ -14,6 +15,16 @@ async function authGuard(req, res, next) {
     const token = readToken(req); // cookie first, Bearer header fallback
     if (!token)
       return res.status(401).json({ error: 'Missing authorization' });
+
+    // CSRF check — only meaningful once we know the request is riding on
+    // the cookie (a Bearer-header API client, e.g. a future mobile app or
+    // server-to-server call, never had this problem in the first place,
+    // since forging a custom Authorization header cross-site isn't possible
+    // the way riding on an ambient cookie is).
+    const usingCookie = !!req.cookies?.[COOKIE_NAME];
+    if (usingCookie && !verifyCsrf(req)) {
+      return res.status(403).json({ error: 'CSRF validation failed. Refresh the page and try again.' });
+    }
 
     try {
       jwt.verify(token, process.env.JWT_SECRET);

@@ -64,7 +64,7 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Firm-ID'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Firm-ID', 'X-CSRF-Token'],
 }));
 // Handle preflight for all routes
 app.options('*', cors());
