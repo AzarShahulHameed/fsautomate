@@ -7,6 +7,7 @@ const jwt     = require('jsonwebtoken');
 const { v4: uuid } = require('uuid');
 const { prisma } = require('../config/db');
 const { authGuard, requireRole } = require('../middleware/tenant');
+const { setAuthCookie, clearAuthCookie, readToken } = require('../utils/authCookie');
  
 router.post('/register', async (req, res, next) => {
   try {
@@ -71,8 +72,8 @@ router.post('/login', async (req, res, next) => {
     const token = jwt.sign({ userId: user.id, firmId: user.firmId }, process.env.JWT_SECRET, { expiresIn: '8h' });
     const expiresAt = new Date(Date.now() + 8 * 60 * 60 * 1000);
     await prisma.userSession.create({ data: { userId: user.id, token, expiresAt } });
+    setAuthCookie(res, token); // httpOnly — not readable by JS, so not stored in localStorage anymore
     res.json({
-      token,
       user: { id: user.id, email: user.email, name: user.name, role: user.role, avatar: user.avatar||null, phone: user.phone||null, designation: user.designation||null },
       firm: { id: user.firm.id, name: user.firm.name, slug: user.firm.slug, region: user.firm.region||'India', currency: user.firm.currency||'INR' },
     });
@@ -81,8 +82,9 @@ router.post('/login', async (req, res, next) => {
  
 router.post('/logout', authGuard, async (req, res, next) => {
   try {
-    const token = req.headers.authorization?.slice(7);
+    const token = readToken(req);
     if (token) await prisma.userSession.deleteMany({ where: { token } });
+    clearAuthCookie(res);
     res.json({ message: 'Logged out' });
   } catch (err) { next(err); }
 });
@@ -311,9 +313,9 @@ router.post('/accept-invite', async (req, res, next) => {
  
     const jwtToken = jwt.sign({ userId: user.id, firmId: user.firmId }, process.env.JWT_SECRET, { expiresIn: '8h' });
     await prisma.userSession.create({ data: { id: uuid(), userId: user.id, token: jwtToken, expiresAt: new Date(Date.now() + 8*60*60*1000) } });
+    setAuthCookie(res, jwtToken);
  
     res.status(201).json({
-      token: jwtToken,
       user:  { id: user.id, name: user.name, email: user.email, role: user.role, firmId: user.firmId },
       firm:  { id: user.firm.id, name: user.firm.name, slug: user.firm.slug, region: user.firm.region, currency: user.firm.currency },
     });
@@ -404,7 +406,7 @@ router.get('/sessions', authGuard, async (req, res, next) => {
       id:        s.id,
       createdAt: s.createdAt,
       expiresAt: s.expiresAt,
-      isCurrent: s.token === req.headers.authorization?.replace('Bearer ',''),
+      isCurrent: s.token === readToken(req),
       userAgent: req.headers['user-agent']?.slice(0,150) || null,
       ipAddress: req.ip,
     }));
@@ -425,7 +427,7 @@ router.delete('/sessions/:id', authGuard, async (req, res, next) => {
 // DELETE /api/auth/sessions — revoke all other sessions
 router.delete('/sessions', authGuard, async (req, res, next) => {
   try {
-    const currentToken = req.headers.authorization?.replace('Bearer ','');
+    const currentToken = readToken(req);
     await prisma.userSession.deleteMany({
       where: { userId: req.user.id, token: { not: currentToken } },
     });

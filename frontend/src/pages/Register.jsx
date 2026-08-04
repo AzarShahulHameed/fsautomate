@@ -76,7 +76,7 @@ export default function Register() {
         phone: form.phone, designation: form.designation, avatar: form.avatar,
       });
       const res = await authAPI.login({ email: form.email, password: form.password });
-      setAuth(res.token, res.user, res.firm);
+      setAuth(res.user, res.firm);
       setStep(2);
       setTimeout(() => navigate('/'), 2000);
     } catch (err) {

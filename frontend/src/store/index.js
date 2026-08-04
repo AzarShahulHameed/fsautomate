@@ -5,9 +5,14 @@ import { authAPI } from '../api/client';
 export const useStore = create(
   persist(
     (set, get) => ({
-      token: null,
-      user:  null,
-      firm:  null,
+      // We can no longer read the auth token from JS (it's an httpOnly
+      // cookie now, by design — that's what stops an XSS bug from being
+      // able to steal it). Auth state is instead tracked as a boolean,
+      // established by calling /auth/me once on app load (see checkAuth).
+      user:            null,
+      firm:            null,
+      isAuthenticated: false,
+      authChecked:     false,
 
       // Global request state — prevents stale data in sidebar/header during page loads
       isLoading: false,
@@ -15,11 +20,24 @@ export const useStore = create(
       setLoading: (v) => set({ isLoading: v }),
       setError:   (e) => set({ error: e }),
 
-      setAuth: (token, user, firm) => set({ token, user, firm }),
+      setAuth: (user, firm) => set({ user, firm, isAuthenticated: true, authChecked: true }),
+
+      // Called once on app boot (and after OAuth redirect) — the browser
+      // sends the httpOnly cookie automatically, so if a valid session
+      // exists /auth/me succeeds without us handling any token directly.
+      checkAuth: async () => {
+        try {
+          const res = await authAPI.me();
+          const { firm, ...user } = res;
+          set({ user, firm, isAuthenticated: true, authChecked: true });
+        } catch (_) {
+          set({ user: null, firm: null, isAuthenticated: false, authChecked: true });
+        }
+      },
 
       clearAuth: async () => {
         try { await authAPI.logout(); } catch (_) {}
-        set({ token: null, user: null, firm: null, currentEngagement: null, currentClient: null });
+        set({ user: null, firm: null, isAuthenticated: false, currentEngagement: null, currentClient: null });
       },
 
       currentClient:     null,
@@ -77,7 +95,7 @@ export const useStore = create(
       name: 'finstatement-auth',
       storage: createJSONStorage(() => localStorage),
       partialize: (s) => ({
-        token: s.token, user: s.user, firm: s.firm,
+        user: s.user, firm: s.firm,
         currentClient: s.currentClient, currentEngagement: s.currentEngagement,
       }),
     }

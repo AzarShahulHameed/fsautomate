@@ -5,16 +5,16 @@
 'use strict';
 const jwt    = require('jsonwebtoken');
 const { prisma } = require('../config/db');
+const { readToken } = require('../utils/authCookie');
 
 const sql = (q, ...p) => prisma.$queryRawUnsafe(q, ...p);
 
 async function authGuard(req, res, next) {
   try {
-    const authHeader = req.headers.authorization;
-    if (!authHeader?.startsWith('Bearer '))
-      return res.status(401).json({ error: 'Missing authorization header' });
+    const token = readToken(req); // cookie first, Bearer header fallback
+    if (!token)
+      return res.status(401).json({ error: 'Missing authorization' });
 
-    const token = authHeader.slice(7);
     try {
       jwt.verify(token, process.env.JWT_SECRET);
     } catch {

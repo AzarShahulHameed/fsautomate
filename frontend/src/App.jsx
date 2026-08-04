@@ -87,22 +87,44 @@ class ErrorBoundary extends React.Component {
 }
  
 // ── Auth guard ────────────────────────────────────────────────────────────────
+// Auth state now comes from an httpOnly cookie the frontend can't read
+// directly, so we can't gate routes on a token value in the store anymore.
+// AuthBoot (below) resolves `authChecked` once on app load by calling
+// /auth/me; until then, PrivateRoute shows a brief loading state instead of
+// bouncing straight to /login (which would flash logged-in users to the
+// login page on every refresh).
 function PrivateRoute({ children }) {
-  const { token } = useStore();
-  return token ? children : <Navigate to="/login" replace />;
+  const { isAuthenticated, authChecked } = useStore();
+  if (!authChecked) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex items-center justify-center">
+        <div className="w-8 h-8 border-4 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+  return isAuthenticated ? children : <Navigate to="/login" replace />;
+}
+
+// ── Auth bootstrap — verifies the httpOnly cookie once per app load ───────────
+function AuthBoot() {
+  const { checkAuth, authChecked } = useStore();
+  useEffect(() => {
+    if (!authChecked) checkAuth();
+  }, []);
+  return null;
 }
  
 // ── Page state restoration ─────────────────────────────────────────────────────
 function PageStateRestorer() {
-  const { token, setPageRoute } = useStore();
+  const { isAuthenticated, setPageRoute } = useStore();
   const navigate  = useNavigate();
   const location  = useLocation();
  
   useEffect(() => {
-    if (token && setPageRoute) {
+    if (isAuthenticated && setPageRoute) {
       setPageRoute(location.pathname + location.search);
     }
-  }, [location.pathname, token]);
+  }, [location.pathname, isAuthenticated]);
  
   return null;
 }
@@ -111,6 +133,7 @@ export default function App() {
   return (
     <BrowserRouter>
       <ErrorBoundary>
+        <AuthBoot />
         <PageStateRestorer />
         <Routes>
           {/* ── Public routes ── */}

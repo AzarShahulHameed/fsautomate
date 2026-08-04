@@ -1,11 +1,12 @@
 // server.js — FinStatement SaaS backend entry point
 'use strict';
  
-const express   = require('express');
-const helmet    = require('helmet');
-const cors      = require('cors');
-const rateLimit = require('express-rate-limit');
-const session   = require('express-session');
+const express      = require('express');
+const helmet       = require('helmet');
+const cors         = require('cors');
+const cookieParser = require('cookie-parser');
+const rateLimit    = require('express-rate-limit');
+const session      = require('express-session');
 const RedisStore       = require('connect-redis').default;
 const { RedisStore: RateLimitRedisStore } = require('rate-limit-redis');
  
@@ -71,6 +72,7 @@ app.options('*', cors());
 // ─── Body parsing ──────────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true }));
+app.use(cookieParser());
  
 // ─── Session ────────────────────────────────────────────────────────────────
 // Was: default express-session MemoryStore. That store logs a hard warning

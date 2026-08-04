@@ -33,7 +33,7 @@ export default function AcceptInvite() {
     setSubmitting(true);
     try {
       const res = await authAPI.acceptInvite({ token, name: form.name.trim(), password: form.password });
-      setAuth(res.token, res.user, res.firm);
+      setAuth(res.user, res.firm);
       toast.success(`Welcome to ${res.firm.name}!`);
       navigate('/');
     } catch (err) {

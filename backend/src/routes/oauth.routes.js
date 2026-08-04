@@ -5,6 +5,7 @@ const router  = require('express').Router();
 const jwt     = require('jsonwebtoken');
 const { v4: uuid } = require('uuid');
 const { prisma } = require('../config/db');
+const { setAuthCookie } = require('../utils/authCookie');
 
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 const JWT_SECRET   = process.env.JWT_SECRET;
@@ -75,20 +76,14 @@ async function createSessionAndRedirect(res, userData) {
     data: { id: uuid(), userId: user.id, token, expiresAt },
   });
 
-  // Redirect to frontend with token in URL — frontend reads it and stores in localStorage
-  const params = new URLSearchParams({
-    token,
-    userId:   user.id,
-    email:    user.email,
-    name:     user.name,
-    avatar:   user.avatar || '',
-    firmId:   firm.id,
-    firmName: firm.name,
-    region:   firm.region,
-    currency: firm.currency,
-  });
+  setAuthCookie(res, token);
 
-  res.redirect(`${FRONTEND_URL}/oauth-callback?${params.toString()}`);
+  // Previously: token (and email, name, avatar) went out in the redirect
+  // URL query string. That's a leak on its own — URLs land in browser
+  // history and server access logs. The cookie above carries auth now;
+  // the frontend calls /api/auth/me after landing on /oauth-callback to
+  // pick up the signed-in user, so nothing sensitive needs to ride in the URL.
+  res.redirect(`${FRONTEND_URL}/oauth-callback`);
 }
 
 // ── GOOGLE OAuth ──────────────────────────────────────────────────────────────

@@ -4,7 +4,7 @@ import { useStore } from '../store';
 
 export default function OAuthCallback() {
   const navigate  = useNavigate();
-  const { setAuth } = useStore();
+  const { checkAuth } = useStore();
 
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
@@ -16,26 +16,12 @@ export default function OAuthCallback() {
       return;
     }
 
-    const token    = params.get('token');
-    const userId   = params.get('userId');
-    const email    = params.get('email');
-    const name     = params.get('name');
-    const avatar   = params.get('avatar');
-    const firmId   = params.get('firmId');
-    const firmName = params.get('firmName');
-    const region   = params.get('region');
-    const currency = params.get('currency');
-
-    if (!token || !userId) {
-      navigate('/login?error=Invalid+OAuth+response', { replace: true });
-      return;
-    }
-
-    const user = { id: userId, email, name, avatar: avatar || null, role: 'FIRM_ADMIN' };
-    const firm = { id: firmId, name: firmName, region, currency };
-
-    setAuth(token, user, firm);
-    navigate('/', { replace: true });
+    // The backend already set an httpOnly auth cookie during the OAuth
+    // redirect — there's no token in this URL to read anymore (a token in
+    // a URL ends up in browser history and server access logs, which is
+    // its own leak). We just ask the API who we are now that the cookie
+    // is set, then continue in.
+    checkAuth().then(() => navigate('/', { replace: true }));
   }, []);
 
   return (

@@ -60,9 +60,8 @@ function SessionManager() {
   const [loading,  setLoading]  = React.useState(true);
 
   React.useEffect(() => {
-    const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-    fetch('/api/auth/sessions', { headers: { Authorization: `Bearer ${token}` } })
-      .then(r => r.ok ? r.json() : [])
+    // Cookie is sent automatically by the browser — no manual token header needed.
+    api.get('/auth/sessions')
       .then(d => { setSessions(Array.isArray(d) ? d : []); setLoading(false); })
       .catch(() => setLoading(false));
   }, []);
@@ -130,13 +129,7 @@ function BillingTab({ firmId, currency }) {
   async function initiateUpgrade(targetPlan) {
     setUpgrading(true);
     try {
-      const token = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-      const res   = await fetch('/api/billing/create-order', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ targetPlan }),
-      });
-      const order = await res.json();
+      const order = await api.post('/billing/create-order', { targetPlan });
 
       if (order.devMode) {
         toast('Razorpay not configured — set RAZORPAY_KEY_ID env var', { icon: 'ℹ️' });
@@ -158,17 +151,15 @@ function BillingTab({ firmId, currency }) {
           prefill:     { name: order.userName, email: order.userEmail },
           theme:       { color: '#4f46e5' },
           handler: async (response) => {
-            const verifyToken = localStorage.getItem('token') || sessionStorage.getItem('token') || '';
-            const vRes = await fetch('/api/billing/verify-payment', {
-              method:  'POST',
-              headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${verifyToken}` },
-              body:    JSON.stringify({ ...response, targetPlan }),
-            });
-            const result = await vRes.json();
-            if (result.success) {
-              toast.success(`Upgraded to ${targetPlan} plan! 🎉`);
-              window.location.reload();
-            } else {
+            try {
+              const result = await api.post('/billing/verify-payment', { ...response, targetPlan });
+              if (result.success) {
+                toast.success(`Upgraded to ${targetPlan} plan! 🎉`);
+                window.location.reload();
+              } else {
+                toast.error('Payment verification failed. Contact support.');
+              }
+            } catch {
               toast.error('Payment verification failed. Contact support.');
             }
           },

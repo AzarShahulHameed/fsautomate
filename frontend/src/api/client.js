@@ -5,26 +5,20 @@ const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL
     ? `${import.meta.env.VITE_API_BASE_URL}/api`
     : 'http://localhost:4000/api',
-  withCredentials: true,
+  withCredentials: true, // sends the httpOnly auth cookie automatically
   timeout: 60000,
 });
  
-api.interceptors.request.use((config) => {
-  try {
-    const raw = localStorage.getItem('finstatement-auth');
-    if (raw) {
-      const { state } = JSON.parse(raw);
-      if (state?.token) config.headers.Authorization = `Bearer ${state.token}`;
-    }
-  } catch (_) {}
-  return config;
-});
+// No request interceptor needed anymore — the backend sets an httpOnly
+// cookie on login/invite-accept/OAuth, and withCredentials above makes the
+// browser attach it automatically. We no longer read a JWT out of
+// localStorage and never had a token to hand it (an XSS bug anywhere in the
+// app could otherwise read it straight out of storage and exfiltrate it).
  
 api.interceptors.response.use(
   (res) => res.data,
   (err) => {
     if (err.response?.status === 401) {
-      localStorage.removeItem('finstatement-auth');
       window.location.href = '/login';
     }
     return Promise.reject(err?.response?.data || err);
@@ -123,24 +117,11 @@ export const reportAPI = {
  
 const BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:4000';
  
-function authHeader() {
-  try {
-    const raw = localStorage.getItem('finstatement-auth');
-    if (raw) {
-      const { state } = JSON.parse(raw);
-      if (state?.token) return { Authorization: `Bearer ${state.token}` };
-    }
-  } catch (_) {}
-  return {};
-}
- 
 export const exportAPI = {
-  word:  (eid) => axios.get(`${BASE}/api/export/${eid}/word`,  { responseType: 'blob', withCredentials: true, headers: authHeader() }).then(r => r.data),
-  excel: (eid) => axios.get(`${BASE}/api/export/${eid}/excel`, { responseType: 'blob', withCredentials: true, headers: authHeader() }).then(r => r.data),
+  word:  (eid) => axios.get(`${BASE}/api/export/${eid}/word`,  { responseType: 'blob', withCredentials: true }).then(r => r.data),
+  excel: (eid) => axios.get(`${BASE}/api/export/${eid}/excel`, { responseType: 'blob', withCredentials: true }).then(r => r.data),
   fsGroupings: (method) => {
-    const token = authHeader()['Authorization'];
     return fetch(`${BASE}/api/mapping/master/download?method=${encodeURIComponent(method || '')}`, {
-      headers: token ? { Authorization: token } : {},
       credentials: 'include',
     }).then(r => { if (!r.ok) throw new Error('Download failed'); return r.blob(); });
   },
@@ -209,6 +190,6 @@ export const billingAPI = {
  
 export const dataExportAPI = {
   download: () => axios.get(`${BASE}/api/data-export`, {
-    responseType: 'blob', withCredentials: true, headers: authHeader()
+    responseType: 'blob', withCredentials: true
   }).then(r => r.data),
 };
